@@ -3,6 +3,23 @@ app:
     name: nodejs22.x
 
 modules:
+  jira:projectSettingsPage:
+    - key: nuvriqo-follow-up-settings
+      resource: admin-ui
+      resolver:
+        function: ui-resolver
+      title: Nuvriqo Follow-Up Manager
+      layout: blank
+
+  jira:issuePanel:
+    - key: nuvriqo-follow-up-issue-panel
+      resource: issue-panel-ui
+      resolver:
+        function: ui-resolver
+      title: Nuvriqo Follow-Up
+      icon: resource:issue-panel-ui;icons/followup.svg
+      viewportSize: medium
+
   trigger:
     - key: nuvriqo-issue-updated
       function: issue-event-handler
@@ -25,6 +42,14 @@ modules:
       handler: index.onCommentCreated
     - key: scheduled-follow-up-processor
       handler: index.processDueFollowUps
+    - key: ui-resolver
+      handler: ui-resolver.handler
+
+resources:
+  - key: admin-ui
+    path: static/admin/dist
+  - key: issue-panel-ui
+    path: static/issue-panel/dist
 
 permissions:
   scopes:
