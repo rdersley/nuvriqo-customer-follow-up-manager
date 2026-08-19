@@ -1,15 +1,19 @@
 {
   "name": "nuvriqo-customer-follow-up-manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Configurable customer follow-up and auto-close manager for Jira Service Management",
   "main": "src/index.js",
   "scripts": {
+    "build:admin": "npm --prefix static/admin install && npm --prefix static/admin run build",
+    "build:panel": "npm --prefix static/issue-panel install && npm --prefix static/issue-panel run build",
+    "build:ui": "npm run build:admin && npm run build:panel",
     "lint": "forge lint",
-    "deploy": "forge deploy"
+    "deploy": "npm run build:ui && forge deploy"
   },
   "dependencies": {
     "@forge/api": "latest",
-    "@forge/kvs": "latest"
+    "@forge/kvs": "latest",
+    "@forge/resolver": "latest"
   }
 }
