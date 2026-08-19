@@ -98,6 +98,7 @@ resolver.define('pauseCycle', async ({ context }) => {
   const issue = await getIssue(issueKey);
   const cycle = await getCycle(issue.id);
   if (!cycle?.active) return { ok: false, error: 'No active follow-up cycle' };
+  if (cycle.paused) return { ok: true };
   cycle.paused = true;
   cycle.pausedAt = new Date().toISOString();
   await saveCycle(cycle);
@@ -110,6 +111,10 @@ resolver.define('resumeCycle', async ({ context }) => {
   const issue = await getIssue(issueKey);
   const cycle = await getCycle(issue.id);
   if (!cycle?.active) return { ok: false, error: 'No active follow-up cycle' };
+  if (cycle.paused && cycle.pausedAt) {
+    const pausedMs = Date.now() - new Date(cycle.pausedAt).getTime();
+    cycle.startedAt = new Date(new Date(cycle.startedAt).getTime() + pausedMs).toISOString();
+  }
   cycle.paused = false;
   cycle.pausedAt = null;
   await saveCycle(cycle);
