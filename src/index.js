@@ -1,4 +1,4 @@
-import { getIssue } from './jira.js';
+import { getIssue, getRequestComment } from './jira.js';
 import { cancelForCustomerReply, processCycle, reconcileIssue } from './followups.js';
 import { getActiveCycles, getRules } from './storage.js';
 
@@ -6,22 +6,8 @@ function eventIssueKey(event) {
   return event?.issue?.key ?? event?.issueKey ?? null;
 }
 
-function isPublicCustomerComment(event) {
-  const comment = event?.comment;
-  if (!comment) return false;
-
-  const isPublic = comment?.jsdPublic === true || comment?.properties?.some?.(
-    (property) => property?.key === 'sd.public.comment' && property?.value?.internal === false
-  );
-  const authorType = comment?.author?.accountType;
-
-  // JSM customer authors are normally Atlassian users too, so event payloads alone
-  // are not always enough to distinguish an agent from a customer. V1 only cancels
-  // automatically when the event explicitly identifies a public customer comment.
-  return isPublic && (authorType === 'customer' || event?.isCustomer === true);
-}
-
 export async function onIssueUpdated(event) {
+  if (event?.selfGenerated) return;
   const issueKey = eventIssueKey(event);
   if (!issueKey) return;
 
@@ -30,11 +16,25 @@ export async function onIssueUpdated(event) {
 }
 
 export async function onCommentCreated(event) {
+  if (event?.selfGenerated) return;
+
   const issueKey = eventIssueKey(event);
   const issueId = event?.issue?.id;
-  if (!issueKey || !issueId) return;
+  const commentId = event?.comment?.id;
+  if (!issueKey || !issueId || !commentId) return;
 
-  if (isPublicCustomerComment(event)) {
+  // Read the JSM comment so visibility is authoritative. For V1 a public reply
+  // from the reporter cancels the sequence. Request-participant detection is
+  // intentionally kept as a follow-on enhancement rather than guessing from
+  // Jira's generic comment event payload.
+  const [issue, requestComment] = await Promise.all([
+    getIssue(issueKey),
+    getRequestComment(issueKey, commentId)
+  ]);
+
+  const reporterId = issue?.fields?.reporter?.accountId;
+  const authorId = requestComment?.author?.accountId;
+  if (requestComment?.public === true && reporterId && authorId === reporterId) {
     await cancelForCustomerReply(issueId, issueKey);
   }
 }
