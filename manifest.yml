@@ -1,0 +1,35 @@
+app:
+  runtime:
+    name: nodejs22.x
+
+modules:
+  trigger:
+    - key: nuvriqo-issue-updated
+      function: issue-event-handler
+      events:
+        - avi:jira:updated:issue
+    - key: nuvriqo-comment-created
+      function: comment-event-handler
+      events:
+        - avi:jira:commented:issue
+
+  scheduledTrigger:
+    - key: nuvriqo-hourly-follow-up-processor
+      function: scheduled-follow-up-processor
+      interval: hour
+
+  function:
+    - key: issue-event-handler
+      handler: index.onIssueUpdated
+    - key: comment-event-handler
+      handler: index.onCommentCreated
+    - key: scheduled-follow-up-processor
+      handler: index.processDueFollowUps
+
+permissions:
+  scopes:
+    - read:jira-work
+    - write:jira-work
+    - read:servicedesk-request
+    - write:servicedesk-request
+    - storage:app
