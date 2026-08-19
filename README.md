@@ -2,34 +2,54 @@
 
 Forge app for Jira Service Management that manages configurable customer follow-up sequences and automatically transitions stale requests to a chosen destination status.
 
-## V1 goals
+## V1 capabilities
 
 - Multiple follow-up rules per project.
 - Rule matching by a configurable Jira field/value, such as `Ticket Type = Hardware`.
 - Any number of reminder steps per rule.
-- Public JSM reminder comments.
-- Stop the sequence when the request leaves the waiting status or receives a public response.
-- Restart a fresh cycle when the request re-enters the waiting status.
+- Public JSM reminder comments with message templates.
+- Configurable waiting status and final destination status.
 - Final transition by **destination status name** rather than hard-coded transition IDs.
-- Forge KVS storage for rules, active cycles, and audit records.
+- Stop/reconcile the sequence when the ticket no longer matches its rule.
+- Restart a fresh cycle when the ticket becomes eligible again.
+- Agent issue panel with pause, resume, restart and cancel controls.
+- Paused time is excluded from reminder/auto-close timing.
+- Per-ticket audit history.
+- Forge KVS storage for rules, active cycles and audit records.
 - Hourly scheduled processor.
+- Project settings UI that discovers the project's Jira fields and statuses.
 
-## Current build stage
+## Project settings
 
-This repository contains the V1 backend foundation. The next build stage adds the project settings UI for creating/editing rules and the issue panel for pause/resume/cancel controls.
+After installation, open the JSM project's **Project settings** and select **Nuvriqo Follow-Up Manager**.
 
-## First-time Forge registration
+A rule defines:
 
-This source tree is intentionally created outside `forge create`. On the development machine, clone the repo and run:
+1. Rule name and priority.
+2. The Jira status that starts/maintains the waiting period.
+3. An optional Jira field/value condition, e.g. `Ticket Type = Hardware`.
+4. As many reminder steps as required, each with its own day and public message.
+5. The day on which the final action occurs.
+6. The destination Jira status.
+
+This allows a Hardware rule to have, for example, four reminders while a General Support rule has only two.
+
+## First-time Forge registration and deployment
+
+This source tree was created directly in GitHub rather than with `forge create`. Clone the repo on the development machine and run:
 
 ```bash
 npm install
 forge register "Nuvriqo Follow-Up Manager"
+npm run build:ui
+forge lint
 forge deploy
 forge install
 ```
 
-`forge register` writes the real Atlassian app ID into `manifest.yml`. Do this only once for the app registration you intend to keep.
+`forge register` writes the real Atlassian app ID into `manifest.yml`. Do this only once for the Atlassian app registration you intend to keep.
+
+For later deployments, the root `npm run deploy` command builds both Custom UI applications and then runs `forge deploy`.
 
 ## Example rule
 
@@ -58,4 +78,4 @@ forge install
 }
 ```
 
-The scheduled processor resolves an available Jira workflow transition whose destination status matches `destinationStatusName`, so customers do not have to hard-code workflow transition IDs.
+At runtime, the scheduled processor reads the transitions currently available on the issue and uses the transition whose destination status matches `destinationStatusName`.
