@@ -13,6 +13,11 @@ export async function getIssue(issueKey) {
   return jsonOrThrow(response, `Get issue ${issueKey}`);
 }
 
+export async function getRequestComment(issueKey, commentId) {
+  const response = await api.asApp().requestJira(route`/rest/servicedeskapi/request/${issueKey}/comment/${commentId}`);
+  return jsonOrThrow(response, `Get JSM comment ${commentId} on ${issueKey}`);
+}
+
 export async function addPublicCustomerComment(issueKey, body) {
   const response = await api.asApp().requestJira(route`/rest/servicedeskapi/request/${issueKey}/comment`, {
     method: 'POST',
