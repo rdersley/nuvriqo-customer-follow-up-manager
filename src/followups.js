@@ -28,6 +28,8 @@ export async function reconcileIssue(issue, rules) {
     issueKey: issue.key,
     ruleId: rule.id,
     active: true,
+    paused: false,
+    pausedAt: null,
     startedAt: new Date().toISOString(),
     completedReminderIndexes: []
   };
@@ -45,6 +47,8 @@ export async function cancelForCustomerReply(issueId, issueKey) {
 }
 
 export async function processCycle(cycle, rule, now = new Date()) {
+  if (cycle.paused) return { action: 'paused' };
+
   const issue = await getIssue(cycle.issueKey);
   const stillMatches = selectRule([rule], issue);
   if (!stillMatches) {
