@@ -1,0 +1,59 @@
+[
+  {
+    "id": "hardware",
+    "name": "Hardware follow-up",
+    "priority": 10,
+    "enabled": true,
+    "projectKey": "SD",
+    "waitingStatusName": "Awaiting Customer Feedback",
+    "condition": {
+      "fieldId": "customfield_TICKET_TYPE",
+      "operator": "equals",
+      "value": "Hardware"
+    },
+    "reminders": [
+      {
+        "afterDays": 2,
+        "message": "Hi {{customer.firstName}}, we're still waiting for your response regarding {{issue.key}} – {{issue.summary}}. Please reply so we can continue with your hardware request."
+      },
+      {
+        "afterDays": 4,
+        "message": "Hi {{customer.firstName}}, this is a second reminder that we're waiting for information on {{issue.key}}."
+      },
+      {
+        "afterDays": 7,
+        "message": "We're still waiting for your response on {{issue.key}}. Please reply to keep the request moving."
+      },
+      {
+        "afterDays": 10,
+        "message": "Final reminder: if we don't receive a response, {{issue.key}} will be closed automatically."
+      }
+    ],
+    "finalAction": {
+      "afterDays": 14,
+      "destinationStatusName": "Resolved"
+    }
+  },
+  {
+    "id": "general",
+    "name": "General support follow-up",
+    "priority": 100,
+    "enabled": true,
+    "projectKey": "SD",
+    "waitingStatusName": "Awaiting Customer Feedback",
+    "reminders": [
+      {
+        "afterDays": 2,
+        "message": "Hi {{customer.firstName}}, we're waiting for your response regarding {{issue.key}}."
+      },
+      {
+        "afterDays": 4,
+        "message": "Final reminder: please reply to {{issue.key}} if you still need assistance."
+      }
+    ],
+    "finalAction": {
+      "afterDays": 7,
+      "destinationStatusName": "Resolved"
+    }
+  }
+]
