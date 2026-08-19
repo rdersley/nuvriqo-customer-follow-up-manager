@@ -4,7 +4,7 @@ app:
 
 modules:
   jira:projectSettingsPage:
-    - key: nuvriqo-follow-up-settings
+    - key: nuvriqo-settings
       resource: admin-ui
       resolver:
         function: ui-resolver
@@ -12,7 +12,7 @@ modules:
       layout: blank
 
   jira:issuePanel:
-    - key: nuvriqo-follow-up-issue-panel
+    - key: nuvriqo-issue-panel
       resource: issue-panel-ui
       resolver:
         function: ui-resolver
@@ -21,26 +21,26 @@ modules:
       viewportSize: medium
 
   trigger:
-    - key: nuvriqo-issue-updated
-      function: issue-event-handler
+    - key: nuvriqo-issue-upd
+      function: issue-handler
       events:
         - avi:jira:updated:issue
-    - key: nuvriqo-comment-created
-      function: comment-event-handler
+    - key: nuvriqo-comment
+      function: comment-handler
       events:
         - avi:jira:commented:issue
 
   scheduledTrigger:
-    - key: nuvriqo-hourly-follow-up-processor
-      function: scheduled-follow-up-processor
+    - key: nuvriqo-hourly
+      function: followup-processor
       interval: hour
 
   function:
-    - key: issue-event-handler
+    - key: issue-handler
       handler: index.onIssueUpdated
-    - key: comment-event-handler
+    - key: comment-handler
       handler: index.onCommentCreated
-    - key: scheduled-follow-up-processor
+    - key: followup-processor
       handler: index.processDueFollowUps
     - key: ui-resolver
       handler: ui-resolver.handler
