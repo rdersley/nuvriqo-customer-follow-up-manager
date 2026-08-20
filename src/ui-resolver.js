@@ -44,6 +44,24 @@ function optionValue(option) {
   };
 }
 
+function flattenActualValues(value, output = []) {
+  if (value == null) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) flattenActualValues(item, output);
+    return output;
+  }
+  if (typeof value === 'object') {
+    const direct = optionValue(value);
+    if (direct) output.push(direct);
+    if (value.child) flattenActualValues(value.child, output);
+    if (value.children) flattenActualValues(value.children, output);
+    return output;
+  }
+  const direct = optionValue(value);
+  if (direct) output.push(direct);
+  return output;
+}
+
 function uniqueOptions(options) {
   const map = new Map();
   for (const option of options) {
@@ -62,19 +80,48 @@ async function getProjectFieldAllowedValues(projectKey, fieldId) {
   if (!issueTypesResponse.ok) return [];
 
   const issueTypesData = await issueTypesResponse.json();
-  const issueTypes = issueTypesData?.issueTypes ?? [];
+  const issueTypes = issueTypesData?.issueTypes ?? issueTypesData?.values ?? [];
   const collected = [];
 
   for (const issueType of issueTypes) {
-    const fieldsResponse = await api.asApp().requestJira(
-      route`/rest/api/3/issue/createmeta/${projectKey}/issuetypes/${issueType.id}?maxResults=200`
-    );
-    if (!fieldsResponse.ok) continue;
-    const fieldsData = await fieldsResponse.json();
-    const field = (fieldsData?.fields ?? []).find((item) => item.fieldId === fieldId || item.key === fieldId);
-    if (field?.allowedValues?.length) collected.push(...field.allowedValues);
+    let startAt = 0;
+    let total = 1;
+    while (startAt < total) {
+      const fieldsResponse = await api.asApp().requestJira(
+        route`/rest/api/3/issue/createmeta/${projectKey}/issuetypes/${issueType.id}?startAt=${startAt}&maxResults=50`
+      );
+      if (!fieldsResponse.ok) break;
+      const fieldsData = await fieldsResponse.json();
+      const fields = fieldsData?.fields ?? fieldsData?.values ?? [];
+      const field = fields.find((item) => item.fieldId === fieldId || item.key === fieldId);
+      if (field?.allowedValues?.length) collected.push(...field.allowedValues);
+      startAt += Number(fieldsData?.maxResults ?? fields.length ?? 50);
+      total = Number(fieldsData?.total ?? fields.length ?? 0);
+      if (!fields.length) break;
+    }
   }
 
+  return uniqueOptions(collected);
+}
+
+function escapeJqlString(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+async function getObservedProjectFieldValues(projectKey, fieldId, fieldName) {
+  if (!projectKey || !fieldId || !fieldName) return [];
+  const jql = `project = "${escapeJqlString(projectKey)}" AND "${escapeJqlString(fieldName)}" is not EMPTY`;
+  const response = await api.asApp().requestJira(route`/rest/api/3/search/jql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ jql, maxResults: 100, fields: [fieldId] })
+  });
+  if (!response.ok) return [];
+  const data = await response.json();
+  const collected = [];
+  for (const issue of data?.issues ?? []) {
+    flattenActualValues(issue?.fields?.[fieldId], collected);
+  }
   return uniqueOptions(collected);
 }
 
@@ -136,21 +183,51 @@ resolver.define('getFieldOptions', async ({ payload, context }) => {
   const fieldName = String(payload?.fieldName ?? '').trim();
   if (!projectKey || !fieldId) return { values: [], source: 'none' };
 
+  const sources = [];
   try {
     const allowedValues = await getProjectFieldAllowedValues(projectKey, fieldId);
-    if (allowedValues.length) return { values: allowedValues.slice(0, 250), source: 'field-metadata' };
+    if (allowedValues.length) sources.push(...allowedValues);
   } catch (error) {
-    console.warn(`Unable to load allowed values for ${fieldId}:`, error);
+    console.warn(`Unable to load create metadata values for ${fieldId}:`, error);
   }
 
-  const suggestions = await getJqlSuggestions(fieldName);
-  return { values: suggestions.slice(0, 250), source: suggestions.length ? 'jql' : 'none' };
+  try {
+    const observedValues = await getObservedProjectFieldValues(projectKey, fieldId, fieldName);
+    if (observedValues.length) sources.push(...observedValues);
+  } catch (error) {
+    console.warn(`Unable to sample current issue values for ${fieldId}:`, error);
+  }
+
+  try {
+    const suggestions = await getJqlSuggestions(fieldName);
+    if (suggestions.length) sources.push(...suggestions);
+  } catch (error) {
+    console.warn(`Unable to load JQL suggestions for ${fieldId}:`, error);
+  }
+
+  const values = uniqueOptions(sources).slice(0, 300);
+  return { values, source: values.length ? 'jira' : 'none' };
 });
 
 resolver.define('getFieldSuggestions', async ({ payload }) => {
   const fieldName = String(payload?.fieldName ?? '').trim();
   const fieldValue = String(payload?.fieldValue ?? '').trim();
   return { values: await getJqlSuggestions(fieldName, fieldValue) };
+});
+
+resolver.define('searchParticipants', async ({ payload }) => {
+  const query = String(payload?.query ?? '').trim();
+  if (query.length < 2) return { users: [] };
+  const response = await api.asApp().requestJira(
+    route`/rest/api/3/groupuserpicker?query=${query}&maxResults=20&showAvatar=true&caseInsensitive=true&excludeConnectAddons=true`
+  );
+  if (!response.ok) return { users: [] };
+  const data = await response.json();
+  const users = (data?.users?.users ?? [])
+    .filter((user) => user?.accountId && user?.displayName)
+    .map((user) => ({ accountId: user.accountId, displayName: user.displayName, avatarUrl: user.avatarUrl ?? null }))
+    .slice(0, 20);
+  return { users };
 });
 
 resolver.define('saveRule', async ({ payload, context }) => {
