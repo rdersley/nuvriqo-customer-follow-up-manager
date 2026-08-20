@@ -3,6 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@forge/bridge';
 import './styles.css';
 
+const blankCondition = () => ({ fieldId: '', operator: 'equals', value: '' });
+const blankReminder = (afterDays = 2) => ({
+  afterDays,
+  message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.',
+  destinationStatusName: '',
+  participantAccountIds: []
+});
+
 const emptyRule = (projectKey = '') => ({
   id: `rule-${Date.now()}`,
   name: '',
@@ -11,18 +19,86 @@ const emptyRule = (projectKey = '') => ({
   projectKey,
   waitingStatusName: '',
   timingUnit: 'days',
-  condition: { fieldId: '', operator: 'equals', value: '' },
-  reminders: [{ afterDays: 2, message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.' }],
-  finalAction: { afterDays: 7, destinationStatusName: '' }
+  conditions: [blankCondition()],
+  reminders: [blankReminder(2)],
+  finalAction: { afterDays: 7, destinationStatusName: '', resolutionId: '' }
 });
+
+function normaliseRule(rule) {
+  const next = structuredClone(rule);
+  next.timingUnit ??= 'days';
+  next.conditions = Array.isArray(next.conditions)
+    ? next.conditions
+    : next.condition?.fieldId
+      ? [next.condition]
+      : [blankCondition()];
+  next.reminders = (next.reminders ?? []).map((reminder) => ({
+    ...reminder,
+    destinationStatusName: reminder.destinationStatusName ?? '',
+    participantAccountIds: reminder.participantAccountIds ?? []
+  }));
+  next.finalAction = { resolutionId: '', ...(next.finalAction ?? {}) };
+  return next;
+}
+
+function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const field = fields.find((item) => item.id === condition.fieldId);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!field?.name) {
+        setSuggestions([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const result = await invoke('getFieldSuggestions', { fieldName: field.name });
+        if (!cancelled) setSuggestions(result?.values ?? []);
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [field?.id]);
+
+  return <div className="condition-row">
+    <label>Ticket field
+      <select value={condition.fieldId} onChange={(e) => onUpdate(index, 'fieldId', e.target.value, true)}>
+        <option value="">Choose field…</option>
+        {fields.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+    </label>
+    <label>Comparison
+      <select value={condition.operator ?? 'equals'} onChange={(e) => onUpdate(index, 'operator', e.target.value)}>
+        <option value="equals">Equals</option>
+        <option value="notEquals">Does not equal</option>
+      </select>
+    </label>
+    <label>Value
+      <input
+        list={`field-values-${index}`}
+        value={condition.value ?? ''}
+        onChange={(e) => onUpdate(index, 'value', e.target.value)}
+        placeholder={loading ? 'Loading Jira values…' : 'Choose or type value'}
+      />
+      <datalist id={`field-values-${index}`}>{suggestions.map((item) => <option key={item.value} value={item.value}>{item.displayName}</option>)}</datalist>
+      <span className="hint-inline">{suggestions.length ? `${suggestions.length} Jira values available.` : 'Free text remains available for fields without suggestions.'}</span>
+    </label>
+    {canRemove && <button className="icon-danger condition-remove" onClick={() => onRemove(index)} title="Remove filter">×</button>}
+  </div>;
+}
 
 function App() {
   const [setup, setSetup] = useState(null);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [fieldSuggestions, setFieldSuggestions] = useState([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   async function load() {
     setBusy(true);
@@ -40,30 +116,7 @@ function App() {
 
   const fieldOptions = useMemo(() => setup?.fields ?? [], [setup]);
   const statuses = setup?.statuses ?? [];
-  const selectedField = editing?.condition?.fieldId
-    ? fieldOptions.find((field) => field.id === editing.condition.fieldId)
-    : null;
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadSuggestions() {
-      if (!selectedField?.name) {
-        setFieldSuggestions([]);
-        return;
-      }
-      setLoadingSuggestions(true);
-      try {
-        const result = await invoke('getFieldSuggestions', { fieldName: selectedField.name });
-        if (!cancelled) setFieldSuggestions(result?.values ?? []);
-      } catch {
-        if (!cancelled) setFieldSuggestions([]);
-      } finally {
-        if (!cancelled) setLoadingSuggestions(false);
-      }
-    }
-    loadSuggestions();
-    return () => { cancelled = true; };
-  }, [selectedField?.id]);
+  const resolutions = setup?.resolutions ?? [];
 
   function update(path, value) {
     setEditing((current) => {
@@ -75,27 +128,44 @@ function App() {
     });
   }
 
-  function changeField(fieldId) {
-    setEditing((current) => ({
-      ...current,
-      condition: { ...current.condition, fieldId, value: '' }
-    }));
-    setFieldSuggestions([]);
+  function updateCondition(index, key, value, resetValue = false) {
+    setEditing((current) => {
+      const next = structuredClone(current);
+      next.conditions[index][key] = value;
+      if (resetValue) next.conditions[index].value = '';
+      return next;
+    });
+  }
+
+  function addCondition() {
+    setEditing((current) => ({ ...current, conditions: [...current.conditions, blankCondition()] }));
+  }
+
+  function removeCondition(index) {
+    setEditing((current) => ({ ...current, conditions: current.conditions.filter((_, i) => i !== index) }));
   }
 
   function addReminder() {
     const last = editing.reminders.at(-1)?.afterDays ?? 0;
-    setEditing({ ...editing, reminders: [...editing.reminders, { afterDays: Number(last) + 2, message: 'Hi {{customer.firstName}}, we are still waiting for your response regarding {{issue.key}}.' }] });
+    setEditing({ ...editing, reminders: [...editing.reminders, blankReminder(Number(last) + 2)] });
   }
 
   function removeReminder(index) {
     setEditing({ ...editing, reminders: editing.reminders.filter((_, i) => i !== index) });
   }
 
+  function updateParticipantIds(index, text) {
+    const ids = text.split(',').map((item) => item.trim()).filter(Boolean);
+    update(['reminders', index, 'participantAccountIds'], ids);
+  }
+
   async function save() {
     setBusy(true); setMessage('');
     try {
-      const result = await invoke('saveRule', { rule: editing });
+      const clean = structuredClone(editing);
+      clean.conditions = clean.conditions.filter((condition) => condition.fieldId);
+      delete clean.condition;
+      const result = await invoke('saveRule', { rule: clean });
       if (!result.ok) {
         setMessage(result.errors.join(' • '));
         return;
@@ -135,55 +205,64 @@ function App() {
     {!editing && <section className="card">
       <h2>Follow-up rules</h2>
       {setup.rules.length === 0 ? <div className="empty">No rules yet. Create your first customer follow-up policy.</div> :
-        <div className="rules">{setup.rules.map((rule) => <div className="rule" key={rule.id}>
-          <div><div className="rule-title">{rule.name}</div><div className="muted">{rule.condition?.fieldId ? `${fieldOptions.find(f => f.id === rule.condition.fieldId)?.name || rule.condition.fieldId} = ${rule.condition.value}` : 'All matching tickets'} · {rule.reminders.length} reminder{rule.reminders.length === 1 ? '' : 's'} · {rule.timingUnit ?? 'days'} · → {rule.finalAction.destinationStatusName}</div></div>
-          <div className="actions"><button onClick={() => setEditing({ timingUnit: 'days', ...structuredClone(rule) })}>Edit</button><button className="danger" onClick={() => remove(rule.id)}>Delete</button></div>
-        </div>)}</div>}
+        <div className="rules">{setup.rules.map((rule) => {
+          const conditions = Array.isArray(rule.conditions) ? rule.conditions : rule.condition?.fieldId ? [rule.condition] : [];
+          const conditionText = conditions.length
+            ? conditions.map((condition) => `${fieldOptions.find((field) => field.id === condition.fieldId)?.name || condition.fieldId} ${condition.operator === 'notEquals' ? '≠' : '='} ${condition.value}`).join(' AND ')
+            : 'All matching tickets';
+          return <div className="rule" key={rule.id}>
+            <div><div className="rule-title">{rule.name}</div><div className="muted">{conditionText} · {rule.reminders.length} reminder{rule.reminders.length === 1 ? '' : 's'} · {rule.timingUnit ?? 'days'} · → {rule.finalAction.destinationStatusName}</div></div>
+            <div className="actions"><button onClick={() => setEditing(normaliseRule(rule))}>Edit</button><button className="danger" onClick={() => remove(rule.id)}>Delete</button></div>
+          </div>;
+        })}</div>}
     </section>}
 
     {editing && <section className="card editor">
-      <div className="section-head"><h2>{setup.rules.some(r => r.id === editing.id) ? 'Edit rule' : 'New rule'}</h2><label className="toggle"><input type="checkbox" checked={editing.enabled} onChange={e => update(['enabled'], e.target.checked)} /> Enabled</label></div>
+      <div className="section-head"><h2>{setup.rules.some((rule) => rule.id === editing.id) ? 'Edit rule' : 'New rule'}</h2><label className="toggle"><input type="checkbox" checked={editing.enabled} onChange={(e) => update(['enabled'], e.target.checked)} /> Enabled</label></div>
 
       <div className="grid two">
-        <label>Rule name<input value={editing.name} onChange={e => update(['name'], e.target.value)} placeholder="Hardware follow-up" /></label>
-        <label>Priority<input type="number" value={editing.priority ?? 100} onChange={e => update(['priority'], Number(e.target.value))} /></label>
+        <label>Rule name<input value={editing.name} onChange={(e) => update(['name'], e.target.value)} placeholder="Ryanair hardware follow-up" /></label>
+        <label>Priority<input type="number" value={editing.priority ?? 100} onChange={(e) => update(['priority'], Number(e.target.value))} /></label>
       </div>
 
-      <h3>Start condition</h3>
+      <h3>Start status</h3>
       <div className="grid two">
-        <label>Waiting status<select value={editing.waitingStatusName} onChange={e => update(['waitingStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
-        <label>Ticket field<select value={editing.condition.fieldId} onChange={e => changeField(e.target.value)}><option value="">Any ticket</option>{fieldOptions.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}</select></label>
+        <label>Waiting status<select value={editing.waitingStatusName} onChange={(e) => update(['waitingStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
+        <label>Time unit<select value={unit} onChange={(e) => update(['timingUnit'], e.target.value)}><option value="days">Days</option><option value="hours">Hours</option></select></label>
       </div>
-      {editing.condition.fieldId && <div className="grid two">
-        <label>Comparison<select value={editing.condition.operator} onChange={e => update(['condition','operator'], e.target.value)}><option value="equals">Equals</option><option value="notEquals">Does not equal</option></select></label>
-        <label>Field value
-          <input list="nuvriqo-field-values" value={editing.condition.value} onChange={e => update(['condition','value'], e.target.value)} placeholder={loadingSuggestions ? 'Loading values…' : 'Hardware'} />
-          <datalist id="nuvriqo-field-values">{fieldSuggestions.map((item) => <option key={item.value} value={item.value}>{item.displayName}</option>)}</datalist>
-          <span className="hint-inline">{loadingSuggestions ? 'Loading Jira values…' : fieldSuggestions.length ? `${fieldSuggestions.length} Jira value suggestions available.` : 'Enter the field value exactly as it appears in Jira.'}</span>
-        </label>
-      </div>}
 
-      <h3>Timing</h3>
-      <div className="grid two">
-        <label>Time unit<select value={unit} onChange={e => update(['timingUnit'], e.target.value)}><option value="days">Days</option><option value="hours">Hours</option></select></label>
-        <div className="hint-box">Use <strong>Hours</strong> for fast testing. Production rules can normally use days.</div>
-      </div>
+      <div className="section-head"><h3>Rule filters</h3><button onClick={addCondition}>+ Add filter</button></div>
+      <p className="hint">All filters must match. Example: <strong>Client = Ryanair</strong> AND <strong>Ticket Type = Hardware</strong>.</p>
+      <div className="conditions">{editing.conditions.map((condition, index) => <ConditionRow key={index} condition={condition} index={index} fields={fieldOptions} onUpdate={updateCondition} onRemove={removeCondition} canRemove={editing.conditions.length > 1} />)}</div>
 
       <div className="section-head"><h3>Customer reminders</h3><button onClick={addReminder}>+ Add reminder</button></div>
-      <div className="reminders">{editing.reminders.map((reminder, index) => <div className="reminder" key={index}>
+      <div className="reminders">{editing.reminders.map((reminder, index) => <div className="reminder expanded" key={index}>
         <div className="reminder-number">{index + 1}</div>
-        <label>After {unitLabel}<input type="number" min="0" value={reminder.afterDays} onChange={e => update(['reminders', index, 'afterDays'], Number(e.target.value))} /></label>
-        <label className="message-field">Public customer message<textarea rows="3" value={reminder.message} onChange={e => update(['reminders', index, 'message'], e.target.value)} /></label>
+        <div className="reminder-main">
+          <div className="grid two">
+            <label>After {unitLabel}<input type="number" min="0" value={reminder.afterDays} onChange={(e) => update(['reminders', index, 'afterDays'], Number(e.target.value))} /></label>
+            <label>Change status after reminder<select value={reminder.destinationStatusName ?? ''} onChange={(e) => update(['reminders', index, 'destinationStatusName'], e.target.value)}><option value="">No status change</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
+          </div>
+          <label>Public customer message<textarea rows="3" value={reminder.message} onChange={(e) => update(['reminders', index, 'message'], e.target.value)} /></label>
+          <label className="participant-field">Add request participant(s)
+            <input value={(reminder.participantAccountIds ?? []).join(', ')} onChange={(e) => updateParticipantIds(index, e.target.value)} placeholder="Atlassian account ID(s), comma separated" />
+            <span className="hint-inline">Participants are added before the public reminder comment. A searchable participant picker is the next UI refinement.</span>
+          </label>
+        </div>
         <button className="icon-danger" onClick={() => removeReminder(index)} title="Remove reminder">×</button>
       </div>)}</div>
       <p className="hint">Template variables: {'{{customer.firstName}}'}, {'{{customer.name}}'}, {'{{issue.key}}'}, {'{{issue.summary}}'}, {'{{daysWaiting}}'}, {'{{waitingAmount}}'}, {'{{waitingUnit}}'}</p>
 
       <h3>Final action</h3>
       <div className="grid two">
-        <label>Auto-transition after {unitLabel}<input type="number" min="0" value={editing.finalAction.afterDays} onChange={e => update(['finalAction','afterDays'], Number(e.target.value))} /></label>
-        <label>Destination status<select value={editing.finalAction.destinationStatusName} onChange={e => update(['finalAction','destinationStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></label>
+        <label>Auto-transition after {unitLabel}<input type="number" min="0" value={editing.finalAction.afterDays} onChange={(e) => update(['finalAction', 'afterDays'], Number(e.target.value))} /></label>
+        <label>Destination status<select value={editing.finalAction.destinationStatusName} onChange={(e) => update(['finalAction', 'destinationStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
       </div>
-      <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches this status.</p>
+      <div className="grid two">
+        <label>Resolution<select value={editing.finalAction.resolutionId ?? ''} onChange={(e) => update(['finalAction', 'resolutionId'], e.target.value)}><option value="">Do not set Resolution</option>{resolutions.map((resolution) => <option key={resolution.id} value={resolution.id}>{resolution.name}</option>)}</select></label>
+        <div className="hint-box">Use this when the destination workflow transition requires Jira's <strong>Resolution</strong> field. Nuvriqo sends it as part of the transition.</div>
+      </div>
+      <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and submits configured transition fields with it.</p>
 
       <div className="footer-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save rule'}</button></div>
     </section>}
