@@ -1,6 +1,6 @@
 {
   "name": "nuvriqo-customer-follow-up-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Configurable customer follow-up and auto-close manager for Jira Service Management",
   "main": "src/index.js",
