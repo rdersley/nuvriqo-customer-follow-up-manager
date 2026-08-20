@@ -40,23 +40,38 @@ export function selectRule(rules, issue) {
 export function validateRule(rule) {
   const errors = [];
   if (!rule?.id) errors.push('Rule id is required');
-  if (!rule?.name) errors.push('Rule name is required');
+  if (!String(rule?.name ?? '').trim()) errors.push('Rule name is required');
   if (!rule?.projectKey) errors.push('Project is required');
   if (!rule?.waitingStatusName) errors.push('Waiting status is required');
+  if (!['days', 'hours'].includes(rule?.timingUnit ?? 'days')) errors.push('Time unit must be days or hours');
 
-  const reminderDays = (rule?.reminders ?? []).map((r) => Number(r.afterDays));
-  if (reminderDays.some((day) => !Number.isFinite(day) || day < 0)) {
-    errors.push('Reminder days must be zero or greater');
+  if (rule?.condition?.fieldId && !String(rule?.condition?.value ?? '').trim()) {
+    errors.push('Field value is required when a ticket field is selected');
   }
-  if (reminderDays.some((day, index) => index > 0 && day <= reminderDays[index - 1])) {
-    errors.push('Reminder days must increase');
+  if (rule?.condition?.fieldId && !['equals', 'notEquals'].includes(rule?.condition?.operator ?? 'equals')) {
+    errors.push('Unsupported field comparison');
   }
 
-  const finalDay = Number(rule?.finalAction?.afterDays);
-  if (!Number.isFinite(finalDay) || finalDay < 0) {
-    errors.push('Final action day is required');
+  if (!Array.isArray(rule?.reminders) || rule.reminders.length === 0) {
+    errors.push('At least one reminder is required');
   }
-  if (reminderDays.length && finalDay <= reminderDays[reminderDays.length - 1]) {
+
+  const reminderValues = (rule?.reminders ?? []).map((r) => Number(r.afterDays));
+  if (reminderValues.some((value) => !Number.isFinite(value) || value < 0)) {
+    errors.push('Reminder timing must be zero or greater');
+  }
+  if (reminderValues.some((value, index) => index > 0 && value <= reminderValues[index - 1])) {
+    errors.push('Reminder timings must increase');
+  }
+  if ((rule?.reminders ?? []).some((reminder) => !String(reminder?.message ?? '').trim())) {
+    errors.push('Every reminder needs a customer message');
+  }
+
+  const finalValue = Number(rule?.finalAction?.afterDays);
+  if (!Number.isFinite(finalValue) || finalValue < 0) {
+    errors.push('Final action timing is required');
+  }
+  if (reminderValues.length && finalValue <= reminderValues[reminderValues.length - 1]) {
     errors.push('Final action must occur after the last reminder');
   }
   if (!rule?.finalAction?.destinationStatusName) {
