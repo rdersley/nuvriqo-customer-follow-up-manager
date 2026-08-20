@@ -37,6 +37,9 @@ modules:
     - key: nuvriqo-hourly
       function: followup-processor
       interval: hour
+    - key: nuvriqo-privacy
+      function: privacy-handler
+      interval: week
 
   function:
     - key: issue-handler
@@ -45,6 +48,8 @@ modules:
       handler: index.onCommentCreated
     - key: followup-processor
       handler: index.processDueFollowUps
+    - key: privacy-handler
+      handler: privacy.processPrivacy
     - key: ui-resolver
       handler: ui-resolver.handler
 
@@ -61,3 +66,4 @@ permissions:
     - read:servicedesk-request
     - write:servicedesk-request
     - storage:app
+    - report:personal-data
