@@ -3,14 +3,34 @@ import { kvs, WhereConditions } from '@forge/kvs';
 const RULE_PREFIX = 'rule:';
 const CYCLE_PREFIX = 'cycle:';
 const AUDIT_PREFIX = 'audit:';
+const ACCOUNT_PREFIX = 'account:';
+const AUDIT_RETENTION_DAYS = 180;
 
 async function queryByPrefix(prefix) {
-  const result = await kvs
-    .query()
-    .where('key', WhereConditions.beginsWith(prefix))
-    .limit(100)
-    .getMany();
-  return result.results ?? [];
+  const results = [];
+  let cursor;
+
+  do {
+    let query = kvs
+      .query()
+      .where('key', WhereConditions.beginsWith(prefix))
+      .limit(100);
+    if (cursor) query = query.cursor(cursor);
+
+    const page = await query.getMany();
+    results.push(...(page.results ?? []));
+    cursor = page.nextCursor;
+  } while (cursor);
+
+  return results;
+}
+
+function participantIdsForRule(rule) {
+  return new Set(
+    (rule?.reminders ?? [])
+      .flatMap((reminder) => reminder?.participantAccountIds ?? [])
+      .filter(Boolean)
+  );
 }
 
 function normaliseStoredRule(rule) {
@@ -25,18 +45,65 @@ function normaliseStoredRule(rule) {
       ? [next.condition]
       : [];
   delete next.condition;
-  next.reminders = (next.reminders ?? []).map((reminder) => ({
-    ...reminder,
-    destinationStatusName: reminder?.destinationStatusName ?? '',
-    participantAccountIds: reminder?.participantAccountIds ?? [],
-    participants: reminder?.participants ?? []
-  }));
+
+  next.reminders = (next.reminders ?? []).map((reminder) => {
+    const clean = {
+      ...reminder,
+      destinationStatusName: reminder?.destinationStatusName ?? '',
+      participantAccountIds: [...new Set(reminder?.participantAccountIds ?? [])]
+    };
+    // Display names are resolved from Jira when the settings UI loads; storing
+    // them would create avoidable personal-data refresh obligations.
+    delete clean.participants;
+    return clean;
+  });
+
   next.finalAction = {
     resolutionId: '',
     fields: {},
     ...(next.finalAction ?? {})
   };
   return next;
+}
+
+async function addAccountRuleReference(accountId, ruleId) {
+  const key = `${ACCOUNT_PREFIX}${accountId}`;
+  const current = await kvs.get(key);
+  const ruleIds = new Set(current?.ruleIds ?? []);
+  ruleIds.add(ruleId);
+  await kvs.set(key, {
+    accountId,
+    ruleIds: [...ruleIds],
+    updatedAt: current?.updatedAt ?? new Date().toISOString()
+  });
+}
+
+async function removeAccountRuleReference(accountId, ruleId) {
+  const key = `${ACCOUNT_PREFIX}${accountId}`;
+  const current = await kvs.get(key);
+  if (!current) return;
+
+  const ruleIds = (current.ruleIds ?? []).filter((id) => id !== ruleId);
+  if (ruleIds.length === 0) {
+    await kvs.delete(key);
+    return;
+  }
+
+  await kvs.set(key, { ...current, ruleIds });
+}
+
+async function syncRuleAccountReferences(previousRule, nextRule) {
+  const previous = participantIdsForRule(previousRule);
+  const next = participantIdsForRule(nextRule);
+  const ruleId = nextRule?.id ?? previousRule?.id;
+  if (!ruleId) return;
+
+  for (const accountId of next) {
+    if (!previous.has(accountId)) await addAccountRuleReference(accountId, ruleId);
+  }
+  for (const accountId of previous) {
+    if (!next.has(accountId)) await removeAccountRuleReference(accountId, ruleId);
+  }
 }
 
 export async function getRules() {
@@ -47,11 +114,18 @@ export async function getRules() {
 }
 
 export async function saveRule(rule) {
-  await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule(rule));
+  const key = `${RULE_PREFIX}${rule.id}`;
+  const previous = normaliseStoredRule(await kvs.get(key));
+  const clean = normaliseStoredRule(rule);
+  await syncRuleAccountReferences(previous, clean);
+  await kvs.set(key, clean);
 }
 
 export async function deleteRule(ruleId) {
-  await kvs.delete(`${RULE_PREFIX}${ruleId}`);
+  const key = `${RULE_PREFIX}${ruleId}`;
+  const previous = normaliseStoredRule(await kvs.get(key));
+  if (previous) await syncRuleAccountReferences(previous, { id: ruleId, reminders: [] });
+  await kvs.delete(key);
 }
 
 export async function getCycle(issueId) {
@@ -74,10 +148,46 @@ export async function getActiveCycles() {
 export async function appendAudit(issueId, type, details = {}) {
   const timestamp = new Date().toISOString();
   const key = `${AUDIT_PREFIX}${issueId}:${timestamp}:${Math.random().toString(36).slice(2, 8)}`;
-  await kvs.set(key, { issueId, timestamp, type, ...details });
+  await kvs.set(
+    key,
+    { issueId, timestamp, type, ...details },
+    { ttl: { unit: 'DAYS', value: AUDIT_RETENTION_DAYS } }
+  );
 }
 
 export async function getAudit(issueId) {
   const results = await queryByPrefix(`${AUDIT_PREFIX}${issueId}:`);
-  return results.map((item) => item.value).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return results
+    .map((item) => item.value)
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+export async function getPersonalDataAccounts() {
+  const results = await queryByPrefix(ACCOUNT_PREFIX);
+  return results.map((item) => item.value).filter((value) => value?.accountId);
+}
+
+export async function markPersonalDataRefreshed(accountId) {
+  const key = `${ACCOUNT_PREFIX}${accountId}`;
+  const current = await kvs.get(key);
+  if (!current) return;
+  await kvs.set(key, { ...current, updatedAt: new Date().toISOString() });
+}
+
+export async function erasePersonalDataForAccount(accountId) {
+  const rules = await getRules();
+  for (const rule of rules) {
+    let changed = false;
+    const reminders = (rule.reminders ?? []).map((reminder) => {
+      const ids = (reminder.participantAccountIds ?? []).filter((id) => id !== accountId);
+      if (ids.length !== (reminder.participantAccountIds ?? []).length) changed = true;
+      return { ...reminder, participantAccountIds: ids };
+    });
+
+    if (changed) {
+      // Write directly to avoid recreating the privacy reference being erased.
+      await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule({ ...rule, reminders }));
+    }
+  }
+  await kvs.delete(`${ACCOUNT_PREFIX}${accountId}`);
 }
