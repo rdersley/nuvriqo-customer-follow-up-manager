@@ -1,6 +1,6 @@
 import { getIssue, getRequestComment, getRequestParticipants } from './jira.js';
 import { cancelForCustomerReply, processCycle, reconcileIssue } from './followups.js';
-import { getActiveCycles, getRules } from './storage.js';
+import { appendAudit, getActiveCycles, getCycle, getRules, saveCycle } from './storage.js';
 
 function eventIssueKey(event) {
   return event?.issue?.key ?? event?.issueKey ?? null;
@@ -52,8 +52,27 @@ export async function processDueFollowUps() {
     if (!rule?.enabled) continue;
     try {
       await processCycle(cycle, rule);
+      const latest = await getCycle(cycle.issueId);
+      if (latest?.lastError) {
+        delete latest.lastError;
+        await saveCycle(latest);
+      }
     } catch (error) {
+      const message = error?.message || String(error);
       console.error(`Failed processing ${cycle.issueKey}:`, error);
+      const latest = await getCycle(cycle.issueId).catch(() => cycle);
+      if (latest) {
+        latest.lastError = {
+          message,
+          occurredAt: new Date().toISOString()
+        };
+        await saveCycle(latest).catch(() => undefined);
+      }
+      await appendAudit(cycle.issueId, 'processing-error', {
+        issueKey: cycle.issueKey,
+        ruleId: cycle.ruleId,
+        message
+      }).catch(() => undefined);
     }
   }
 }
