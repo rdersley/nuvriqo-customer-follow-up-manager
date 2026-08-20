@@ -1,9 +1,20 @@
 import { getIssue, getRequestComment, getRequestParticipants } from './jira.js';
 import { cancelForCustomerReply, processCycle, reconcileIssue } from './followups.js';
-import { appendAudit, getActiveCycles, getCycle, getRules, saveCycle } from './storage.js';
+import {
+  appendAudit,
+  deleteCycle,
+  getActiveCycles,
+  getCycle,
+  getRules,
+  saveCycle
+} from './storage.js';
 
 function eventIssueKey(event) {
   return event?.issue?.key ?? event?.issueKey ?? null;
+}
+
+function invocationContext(event, context) {
+  return context ?? event?.context ?? null;
 }
 
 // Forge does not provide a license object for normal development/staging installs
@@ -14,7 +25,7 @@ function licenseAllows(context) {
 }
 
 export async function onIssueUpdated(event, context) {
-  if (!licenseAllows(context) || event?.selfGenerated) return;
+  if (!licenseAllows(invocationContext(event, context)) || event?.selfGenerated) return;
   const issueKey = eventIssueKey(event);
   if (!issueKey) return;
 
@@ -23,7 +34,7 @@ export async function onIssueUpdated(event, context) {
 }
 
 export async function onCommentCreated(event, context) {
-  if (!licenseAllows(context) || event?.selfGenerated) return;
+  if (!licenseAllows(invocationContext(event, context)) || event?.selfGenerated) return;
 
   const issueKey = eventIssueKey(event);
   const issueId = event?.issue?.id;
@@ -52,15 +63,24 @@ export async function onCommentCreated(event, context) {
   }
 }
 
-export async function processDueFollowUps(_event, context) {
-  if (!licenseAllows(context)) return;
+export async function processDueFollowUps(event, context) {
+  if (!licenseAllows(invocationContext(event, context))) return;
 
   const [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
   const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
 
   for (const cycle of cycles) {
     const rule = rulesById.get(cycle.ruleId);
-    if (!rule?.enabled) continue;
+
+    if (!rule?.enabled) {
+      await deleteCycle(cycle.issueId).catch(() => undefined);
+      await appendAudit(cycle.issueId, 'cycle-cancelled', {
+        issueKey: cycle.issueKey,
+        ruleId: cycle.ruleId,
+        reason: rule ? 'Follow-up rule was disabled' : 'Follow-up rule was deleted'
+      }).catch(() => undefined);
+      continue;
+    }
 
     try {
       await processCycle(cycle, rule);
