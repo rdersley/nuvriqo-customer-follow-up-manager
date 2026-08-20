@@ -13,13 +13,41 @@ async function queryByPrefix(prefix) {
   return result.results ?? [];
 }
 
+function normaliseStoredRule(rule) {
+  if (!rule) return rule;
+  const next = structuredClone(rule);
+  next.priority ??= 100;
+  next.enabled ??= true;
+  next.timingUnit ??= 'days';
+  next.conditions = Array.isArray(next.conditions)
+    ? next.conditions
+    : next.condition?.fieldId
+      ? [next.condition]
+      : [];
+  delete next.condition;
+  next.reminders = (next.reminders ?? []).map((reminder) => ({
+    ...reminder,
+    destinationStatusName: reminder?.destinationStatusName ?? '',
+    participantAccountIds: reminder?.participantAccountIds ?? [],
+    participants: reminder?.participants ?? []
+  }));
+  next.finalAction = {
+    resolutionId: '',
+    fields: {},
+    ...(next.finalAction ?? {})
+  };
+  return next;
+}
+
 export async function getRules() {
   const results = await queryByPrefix(RULE_PREFIX);
-  return results.map((item) => item.value).sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+  return results
+    .map((item) => normaliseStoredRule(item.value))
+    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 }
 
 export async function saveRule(rule) {
-  await kvs.set(`${RULE_PREFIX}${rule.id}`, rule);
+  await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule(rule));
 }
 
 export async function deleteRule(ruleId) {
