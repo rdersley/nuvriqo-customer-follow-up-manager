@@ -15,22 +15,43 @@ function equals(actual, expected) {
   return String(normalised ?? '').toLowerCase() === String(expected ?? '').toLowerCase();
 }
 
+export function getRuleConditions(rule) {
+  if (Array.isArray(rule?.conditions)) return rule.conditions.filter((condition) => condition?.fieldId);
+  return rule?.condition?.fieldId ? [rule.condition] : [];
+}
+
+export function conditionsMatchIssue(rule, issue) {
+  return getRuleConditions(rule).every((condition) => {
+    const actual = issue?.fields?.[condition.fieldId];
+    switch (condition.operator ?? 'equals') {
+      case 'equals':
+        return equals(actual, condition.value);
+      case 'notEquals':
+        return !equals(actual, condition.value);
+      default:
+        return false;
+    }
+  });
+}
+
 export function ruleMatchesIssue(rule, issue) {
   if (!rule?.enabled) return false;
   if (rule.projectKey && issue?.fields?.project?.key !== rule.projectKey) return false;
   if (rule.waitingStatusName && issue?.fields?.status?.name !== rule.waitingStatusName) return false;
+  return conditionsMatchIssue(rule, issue);
+}
 
-  if (!rule.condition?.fieldId) return true;
-  const actual = issue?.fields?.[rule.condition.fieldId];
+export function cycleStillMatchesRule(rule, issue) {
+  if (!rule?.enabled) return false;
+  if (rule.projectKey && issue?.fields?.project?.key !== rule.projectKey) return false;
+  if (!conditionsMatchIssue(rule, issue)) return false;
 
-  switch (rule.condition.operator ?? 'equals') {
-    case 'equals':
-      return equals(actual, rule.condition.value);
-    case 'notEquals':
-      return !equals(actual, rule.condition.value);
-    default:
-      return false;
-  }
+  const allowedStatuses = new Set([
+    rule.waitingStatusName,
+    ...(rule.reminders ?? []).map((reminder) => reminder?.destinationStatusName).filter(Boolean)
+  ].filter(Boolean));
+
+  return allowedStatuses.size === 0 || allowedStatuses.has(issue?.fields?.status?.name);
 }
 
 export function selectRule(rules, issue) {
@@ -45,11 +66,9 @@ export function validateRule(rule) {
   if (!rule?.waitingStatusName) errors.push('Waiting status is required');
   if (!['days', 'hours'].includes(rule?.timingUnit ?? 'days')) errors.push('Time unit must be days or hours');
 
-  if (rule?.condition?.fieldId && !String(rule?.condition?.value ?? '').trim()) {
-    errors.push('Field value is required when a ticket field is selected');
-  }
-  if (rule?.condition?.fieldId && !['equals', 'notEquals'].includes(rule?.condition?.operator ?? 'equals')) {
-    errors.push('Unsupported field comparison');
+  for (const condition of getRuleConditions(rule)) {
+    if (!String(condition?.value ?? '').trim()) errors.push('Each selected ticket field needs a value');
+    if (!['equals', 'notEquals'].includes(condition?.operator ?? 'equals')) errors.push('Unsupported field comparison');
   }
 
   if (!Array.isArray(rule?.reminders) || rule.reminders.length === 0) {
@@ -77,5 +96,5 @@ export function validateRule(rule) {
   if (!rule?.finalAction?.destinationStatusName) {
     errors.push('Destination status is required');
   }
-  return errors;
+  return [...new Set(errors)];
 }
