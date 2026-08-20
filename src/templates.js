@@ -5,12 +5,14 @@ export function renderTemplate(template, context) {
   });
 }
 
-export function buildTemplateContext(issue, cycle, daysWaiting) {
+export function buildTemplateContext(issue, cycle, timing = {}) {
   const displayName = issue?.fields?.reporter?.displayName ?? 'Customer';
   const firstName = displayName.trim().split(/\s+/)[0] || displayName;
   return {
     customer: { name: displayName, firstName },
     issue: { key: issue.key, summary: issue?.fields?.summary ?? '' },
-    daysWaiting
+    daysWaiting: timing.daysWaiting ?? 0,
+    waitingAmount: timing.waitingAmount ?? timing.daysWaiting ?? 0,
+    waitingUnit: timing.waitingUnit ?? 'days'
   };
 }
