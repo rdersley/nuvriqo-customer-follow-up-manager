@@ -18,6 +18,12 @@ export async function getRequestComment(issueKey, commentId) {
   return jsonOrThrow(response, `Get JSM comment ${commentId} on ${issueKey}`);
 }
 
+export async function getRequestParticipants(issueKey) {
+  const response = await api.asApp().requestJira(route`/rest/servicedeskapi/request/${issueKey}/participant?limit=100`);
+  const data = await jsonOrThrow(response, `Get request participants for ${issueKey}`);
+  return data?.values ?? [];
+}
+
 export async function addPublicCustomerComment(issueKey, body) {
   const response = await api.asApp().requestJira(route`/rest/servicedeskapi/request/${issueKey}/comment`, {
     method: 'POST',
