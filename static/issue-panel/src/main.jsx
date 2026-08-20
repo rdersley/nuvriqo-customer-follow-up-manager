@@ -38,8 +38,9 @@ function App() {
     if (!data?.cycle || !data?.rule) return null;
     const done = new Set(data.cycle.completedReminderIndexes ?? []);
     const nextIndex = data.rule.reminders.findIndex((_, index) => !done.has(index));
-    if (nextIndex >= 0) return `Reminder ${nextIndex + 1} after ${data.rule.reminders[nextIndex].afterDays} day(s)`;
-    return `Auto-transition to ${data.rule.finalAction.destinationStatusName} after ${data.rule.finalAction.afterDays} day(s)`;
+    const unit = data.rule.timingUnit === 'hours' ? 'hour(s)' : 'day(s)';
+    if (nextIndex >= 0) return `Reminder ${nextIndex + 1} after ${data.rule.reminders[nextIndex].afterDays} ${unit}`;
+    return `Auto-transition to ${data.rule.finalAction.destinationStatusName} after ${data.rule.finalAction.afterDays} ${unit}`;
   }, [data]);
 
   if (!data) return <main className="panel"><p>{busy ? 'Loading Nuvriqo follow-up…' : message}</p></main>;
@@ -62,9 +63,15 @@ function App() {
         </div>
       </div>
 
+      {cycle.lastError && <div className="error-box">
+        <strong>Follow-up action needs attention</strong>
+        <span>{cycle.lastError.message}</span>
+        <small>{fmt(cycle.lastError.occurredAt)}</small>
+      </div>}
+
       <div className="metrics">
         <div><span>Started</span><strong>{fmt(cycle.startedAt)}</strong></div>
-        <div><span>Reminders sent</span><strong>{cycle.completedReminderIndexes?.length ?? 0} / {data.rule?.reminders?.length ?? 0}</strong></div>
+        <div><span>Reminders completed</span><strong>{cycle.completedReminderIndexes?.length ?? 0} / {data.rule?.reminders?.length ?? 0}</strong></div>
         <div><span>Next action</span><strong>{cycle.paused ? 'Paused' : nextAction}</strong></div>
         <div><span>Final status</span><strong>{data.rule?.finalAction?.destinationStatusName ?? '—'}</strong></div>
       </div>
@@ -74,7 +81,7 @@ function App() {
       <h4>Recent activity</h4>
       {data.audit.length === 0 ? <p className="muted">No Nuvriqo activity recorded yet.</p> : data.audit.map((item, index) => <div className="audit-row" key={`${item.timestamp}-${index}`}>
         <div className="audit-time">{fmt(item.timestamp)}</div>
-        <div><strong>{item.type.replaceAll('-', ' ')}</strong>{item.reason && <span> — {item.reason}</span>}{item.destinationStatusName && <span> → {item.destinationStatusName}</span>}</div>
+        <div><strong>{item.type.replaceAll('-', ' ')}</strong>{item.reason && <span> — {item.reason}</span>}{item.destinationStatusName && <span> → {item.destinationStatusName}</span>}{item.message && item.type === 'processing-error' && <span> — {item.message}</span>}</div>
       </div>)}
     </div>
   </main>;
