@@ -31,6 +31,66 @@ function issueKeyFromContext(context) {
   return context?.extension?.issue?.key ?? context?.issue?.key ?? null;
 }
 
+function optionValue(option) {
+  if (option == null) return null;
+  if (typeof option === 'string' || typeof option === 'number' || typeof option === 'boolean') {
+    return { value: String(option), displayName: String(option) };
+  }
+  const value = option.value ?? option.name ?? option.displayName ?? option.key ?? option.id;
+  if (value == null) return null;
+  return {
+    value: String(value),
+    displayName: String(option.displayName ?? option.name ?? option.value ?? value)
+  };
+}
+
+function uniqueOptions(options) {
+  const map = new Map();
+  for (const option of options) {
+    const normalised = optionValue(option);
+    if (!normalised?.value) continue;
+    const key = normalised.value.toLowerCase();
+    if (!map.has(key)) map.set(key, normalised);
+  }
+  return [...map.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
+}
+
+async function getProjectFieldAllowedValues(projectKey, fieldId) {
+  const issueTypesResponse = await api.asApp().requestJira(
+    route`/rest/api/3/issue/createmeta/${projectKey}/issuetypes?maxResults=100`
+  );
+  if (!issueTypesResponse.ok) return [];
+
+  const issueTypesData = await issueTypesResponse.json();
+  const issueTypes = issueTypesData?.issueTypes ?? [];
+  const collected = [];
+
+  for (const issueType of issueTypes) {
+    const fieldsResponse = await api.asApp().requestJira(
+      route`/rest/api/3/issue/createmeta/${projectKey}/issuetypes/${issueType.id}?maxResults=200`
+    );
+    if (!fieldsResponse.ok) continue;
+    const fieldsData = await fieldsResponse.json();
+    const field = (fieldsData?.fields ?? []).find((item) => item.fieldId === fieldId || item.key === fieldId);
+    if (field?.allowedValues?.length) collected.push(...field.allowedValues);
+  }
+
+  return uniqueOptions(collected);
+}
+
+async function getJqlSuggestions(fieldName, fieldValue = '') {
+  if (!fieldName) return [];
+  const response = fieldValue
+    ? await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}&fieldValue=${fieldValue}`)
+    : await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}`);
+  if (!response.ok) return [];
+  const data = await response.json();
+  return uniqueOptions((data?.results ?? []).map((item) => ({
+    value: item?.value,
+    displayName: item?.displayName ?? item?.value
+  })));
+}
+
 resolver.define('getProjectSetup', async ({ context }) => {
   const projectKey = projectKeyFromContext(context);
   if (!projectKey) throw new Error('Project context is unavailable');
@@ -70,24 +130,27 @@ resolver.define('getProjectSetup', async ({ context }) => {
   };
 });
 
+resolver.define('getFieldOptions', async ({ payload, context }) => {
+  const projectKey = projectKeyFromContext(context);
+  const fieldId = String(payload?.fieldId ?? '').trim();
+  const fieldName = String(payload?.fieldName ?? '').trim();
+  if (!projectKey || !fieldId) return { values: [], source: 'none' };
+
+  try {
+    const allowedValues = await getProjectFieldAllowedValues(projectKey, fieldId);
+    if (allowedValues.length) return { values: allowedValues.slice(0, 250), source: 'field-metadata' };
+  } catch (error) {
+    console.warn(`Unable to load allowed values for ${fieldId}:`, error);
+  }
+
+  const suggestions = await getJqlSuggestions(fieldName);
+  return { values: suggestions.slice(0, 250), source: suggestions.length ? 'jql' : 'none' };
+});
+
 resolver.define('getFieldSuggestions', async ({ payload }) => {
   const fieldName = String(payload?.fieldName ?? '').trim();
   const fieldValue = String(payload?.fieldValue ?? '').trim();
-  if (!fieldName) return { values: [] };
-
-  const response = fieldValue
-    ? await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}&fieldValue=${fieldValue}`)
-    : await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}`);
-
-  if (!response.ok) return { values: [] };
-
-  const data = await response.json();
-  const values = (data?.results ?? [])
-    .map((item) => ({ value: item?.value ?? '', displayName: item?.displayName ?? item?.value ?? '' }))
-    .filter((item) => item.value)
-    .slice(0, 100);
-
-  return { values };
+  return { values: await getJqlSuggestions(fieldName, fieldValue) };
 });
 
 resolver.define('saveRule', async ({ payload, context }) => {
