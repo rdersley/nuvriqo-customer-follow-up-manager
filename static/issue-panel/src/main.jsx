@@ -46,20 +46,23 @@ function App() {
   if (!data) return <main className="panel"><p>{busy ? 'Loading Nuvriqo follow-up…' : message}</p></main>;
 
   const cycle = data.cycle;
+  const canWrite = data.licensed !== false;
+
   return <main className="panel">
+    {data.licensed === false && <div className="notice">Nuvriqo is read-only because this installation does not currently have an active Marketplace license.</div>}
     {message && <div className="notice">{message}</div>}
 
     {!cycle ? <div className="empty">
       <div className="status-dot off" />
       <div><h3>No active follow-up</h3><p>This ticket is not currently running a Nuvriqo follow-up cycle.</p></div>
-      <button disabled={busy} onClick={() => run('restartCycle')}>Start if eligible</button>
+      <button disabled={busy || !canWrite} onClick={() => run('restartCycle')}>Start if eligible</button>
     </div> : <>
       <div className="topline">
         <div><span className={`pill ${cycle.paused ? 'paused' : 'active'}`}>{cycle.paused ? 'Paused' : 'Active'}</span><h3>{data.rule?.name || cycle.ruleId}</h3></div>
         <div className="buttons">
-          {cycle.paused ? <button onClick={() => run('resumeCycle')} disabled={busy}>Resume</button> : <button onClick={() => run('pauseCycle')} disabled={busy}>Pause</button>}
-          <button onClick={() => run('restartCycle')} disabled={busy}>Restart</button>
-          <button className="danger" onClick={() => run('cancelCycle')} disabled={busy}>Cancel</button>
+          {cycle.paused ? <button onClick={() => run('resumeCycle')} disabled={busy || !canWrite}>Resume</button> : <button onClick={() => run('pauseCycle')} disabled={busy || !canWrite}>Pause</button>}
+          <button onClick={() => run('restartCycle')} disabled={busy || !canWrite}>Restart</button>
+          <button className="danger" onClick={() => run('cancelCycle')} disabled={busy || !canWrite}>Cancel</button>
         </div>
       </div>
 
