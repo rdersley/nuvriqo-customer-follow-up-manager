@@ -32,7 +32,10 @@ export async function reconcileIssue(issue, rules) {
       const existingRule = (rules ?? []).find((item) => item.id === existing.ruleId);
       if (existingRule && cycleStillMatchesRule(existingRule, issue)) return existing;
       await deleteCycle(issue.id);
-      await appendAudit(issue.id, 'cycle-cancelled', { issueKey: issue.key, reason: 'Issue no longer matches an enabled follow-up rule' });
+      await appendAudit(issue.id, 'cycle-cancelled', {
+        issueKey: issue.key,
+        reason: 'Issue no longer matches an enabled follow-up rule'
+      });
     }
     return null;
   }
@@ -51,7 +54,11 @@ export async function reconcileIssue(issue, rules) {
     reminderProgress: {}
   };
   await saveCycle(cycle);
-  await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name });
+  await appendAudit(issue.id, 'cycle-started', {
+    issueKey: issue.key,
+    ruleId: rule.id,
+    ruleName: rule.name
+  });
   return cycle;
 }
 
@@ -76,7 +83,7 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
       issueKey: cycle.issueKey,
       ruleId: rule.id,
       reminderIndex: index,
-      accountIds: reminder.participantAccountIds
+      participantCount: reminder.participantAccountIds.length
     });
   } else if (!progress.participantsAdded) {
     progress.participantsAdded = true;
@@ -121,7 +128,10 @@ export async function processCycle(cycle, rule, now = new Date()) {
   const issue = await getIssue(cycle.issueKey);
   if (!cycleStillMatchesRule(rule, issue)) {
     await deleteCycle(cycle.issueId);
-    await appendAudit(cycle.issueId, 'cycle-cancelled', { issueKey: cycle.issueKey, reason: 'Issue no longer matches rule or configured reminder statuses' });
+    await appendAudit(cycle.issueId, 'cycle-cancelled', {
+      issueKey: cycle.issueKey,
+      reason: 'Issue no longer matches rule or configured reminder statuses'
+    });
     return { action: 'cancelled' };
   }
 
@@ -154,8 +164,11 @@ export async function processCycle(cycle, rule, now = new Date()) {
 
   if (waitingAmount >= Number(rule.finalAction.afterDays)) {
     const transitionFields = {};
-    if (rule.finalAction.resolutionId) transitionFields.resolution = { id: rule.finalAction.resolutionId };
-    else if (rule.finalAction.resolutionName) transitionFields.resolution = { name: rule.finalAction.resolutionName };
+    if (rule.finalAction.resolutionId) {
+      transitionFields.resolution = { id: rule.finalAction.resolutionId };
+    } else if (rule.finalAction.resolutionName) {
+      transitionFields.resolution = { name: rule.finalAction.resolutionName };
+    }
     Object.assign(transitionFields, rule.finalAction.fields ?? {});
 
     const transition = await transitionToStatus(
