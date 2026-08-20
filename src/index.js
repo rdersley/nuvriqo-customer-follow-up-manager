@@ -6,8 +6,15 @@ function eventIssueKey(event) {
   return event?.issue?.key ?? event?.issueKey ?? null;
 }
 
-export async function onIssueUpdated(event) {
-  if (event?.selfGenerated) return;
+// Forge does not provide a license object for normal development/staging installs
+// unless a license state is being simulated. In production, an explicit inactive
+// license disables processing while leaving read-only visibility available.
+function licenseAllows(context) {
+  return context?.license == null || context.license.active === true;
+}
+
+export async function onIssueUpdated(event, context) {
+  if (!licenseAllows(context) || event?.selfGenerated) return;
   const issueKey = eventIssueKey(event);
   if (!issueKey) return;
 
@@ -15,8 +22,8 @@ export async function onIssueUpdated(event) {
   await reconcileIssue(issue, rules);
 }
 
-export async function onCommentCreated(event) {
-  if (event?.selfGenerated) return;
+export async function onCommentCreated(event, context) {
+  if (!licenseAllows(context) || event?.selfGenerated) return;
 
   const issueKey = eventIssueKey(event);
   const issueId = event?.issue?.id;
@@ -35,7 +42,9 @@ export async function onCommentCreated(event) {
   const authorId = requestComment?.author?.accountId;
   if (!authorId) return;
 
-  const participantIds = new Set((participants ?? []).map((participant) => participant?.accountId).filter(Boolean));
+  const participantIds = new Set(
+    (participants ?? []).map((participant) => participant?.accountId).filter(Boolean)
+  );
   const isCustomerReply = authorId === reporterId || participantIds.has(authorId);
 
   if (isCustomerReply) {
@@ -43,13 +52,16 @@ export async function onCommentCreated(event) {
   }
 }
 
-export async function processDueFollowUps() {
+export async function processDueFollowUps(_event, context) {
+  if (!licenseAllows(context)) return;
+
   const [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
   const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
 
   for (const cycle of cycles) {
     const rule = rulesById.get(cycle.ruleId);
     if (!rule?.enabled) continue;
+
     try {
       await processCycle(cycle, rule);
       const latest = await getCycle(cycle.issueId);
@@ -60,6 +72,7 @@ export async function processDueFollowUps() {
     } catch (error) {
       const message = error?.message || String(error);
       console.error(`Failed processing ${cycle.issueKey}:`, error);
+
       const latest = await getCycle(cycle.issueId).catch(() => cycle);
       if (latest) {
         latest.lastError = {
@@ -68,6 +81,7 @@ export async function processDueFollowUps() {
         };
         await saveCycle(latest).catch(() => undefined);
       }
+
       await appendAudit(cycle.issueId, 'processing-error', {
         issueKey: cycle.issueKey,
         ruleId: cycle.ruleId,
