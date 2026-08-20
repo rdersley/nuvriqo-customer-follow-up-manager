@@ -54,11 +54,41 @@ resolver.define('getProjectSetup', async ({ context }) => {
     projectKey,
     fields: (fields ?? [])
       .filter((field) => field?.id && field?.name)
-      .map((field) => ({ id: field.id, name: field.name, custom: Boolean(field.custom) }))
+      .map((field) => ({
+        id: field.id,
+        name: field.name,
+        custom: Boolean(field.custom),
+        schemaType: field.schema?.type ?? null,
+        schemaCustom: field.schema?.custom ?? null
+      }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     statuses: [...statusMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
     rules: rules.filter((rule) => rule.projectKey === projectKey)
   };
+});
+
+resolver.define('getFieldSuggestions', async ({ payload }) => {
+  const fieldName = String(payload?.fieldName ?? '').trim();
+  const fieldValue = String(payload?.fieldValue ?? '').trim();
+  if (!fieldName) return { values: [] };
+
+  const response = fieldValue
+    ? await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}&fieldValue=${fieldValue}`)
+    : await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}`);
+
+  if (!response.ok) {
+    // Some Jira field types do not expose suggestions. The UI deliberately
+    // falls back to free text so those fields remain usable.
+    return { values: [] };
+  }
+
+  const data = await response.json();
+  const values = (data?.results ?? [])
+    .map((item) => ({ value: item?.value ?? '', displayName: item?.displayName ?? item?.value ?? '' }))
+    .filter((item) => item.value)
+    .slice(0, 100);
+
+  return { values };
 });
 
 resolver.define('saveRule', async ({ payload, context }) => {
