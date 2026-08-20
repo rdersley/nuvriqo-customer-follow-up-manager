@@ -63,8 +63,21 @@ export async function transitionToStatus(issueKey, destinationStatusName, fields
     throw new Error(`No available transition to "${destinationStatusName}" for ${issueKey}. Available destinations: ${available || 'none'}`);
   }
 
+  const cleanFields = Object.fromEntries(
+    Object.entries(fields ?? {}).filter(([, value]) => value != null && value !== '')
+  );
+
+  const missingRequired = Object.entries(transition.fields ?? {})
+    .filter(([fieldId, metadata]) => metadata?.required && !metadata?.hasDefaultValue && cleanFields[fieldId] == null)
+    .map(([fieldId, metadata]) => metadata?.name || fieldId);
+
+  if (missingRequired.length) {
+    throw new Error(
+      `Transition to "${destinationStatusName}" for ${issueKey} requires additional field${missingRequired.length === 1 ? '' : 's'}: ${missingRequired.join(', ')}`
+    );
+  }
+
   const payload = { transition: { id: transition.id } };
-  const cleanFields = Object.fromEntries(Object.entries(fields ?? {}).filter(([, value]) => value != null && value !== ''));
   if (Object.keys(cleanFields).length) payload.fields = cleanFields;
 
   const response = await api.asApp().requestJira(route`/rest/api/3/issue/${issueKey}/transitions`, {
