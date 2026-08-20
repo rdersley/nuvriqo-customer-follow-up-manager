@@ -42,23 +42,31 @@ function normaliseRule(rule) {
 }
 
 function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove }) {
-  const [suggestions, setSuggestions] = useState([]);
+  const [options, setOptions] = useState([]);
+  const [source, setSource] = useState('none');
   const [loading, setLoading] = useState(false);
   const field = fields.find((item) => item.id === condition.fieldId);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!field?.name) {
-        setSuggestions([]);
+      if (!field?.id) {
+        setOptions([]);
+        setSource('none');
         return;
       }
       setLoading(true);
       try {
-        const result = await invoke('getFieldSuggestions', { fieldName: field.name });
-        if (!cancelled) setSuggestions(result?.values ?? []);
+        const result = await invoke('getFieldOptions', { fieldId: field.id, fieldName: field.name });
+        if (!cancelled) {
+          setOptions(result?.values ?? []);
+          setSource(result?.source ?? 'none');
+        }
       } catch {
-        if (!cancelled) setSuggestions([]);
+        if (!cancelled) {
+          setOptions([]);
+          setSource('none');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,6 +74,8 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
     load();
     return () => { cancelled = true; };
   }, [field?.id]);
+
+  const hasOptions = options.length > 0;
 
   return <div className="condition-row">
     <label>Ticket field
@@ -81,14 +91,13 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
       </select>
     </label>
     <label>Value
-      <input
-        list={`field-values-${index}`}
-        value={condition.value ?? ''}
-        onChange={(e) => onUpdate(index, 'value', e.target.value)}
-        placeholder={loading ? 'Loading Jira values…' : 'Choose or type value'}
-      />
-      <datalist id={`field-values-${index}`}>{suggestions.map((item) => <option key={item.value} value={item.value}>{item.displayName}</option>)}</datalist>
-      <span className="hint-inline">{suggestions.length ? `${suggestions.length} Jira values available.` : 'Free text remains available for fields without suggestions.'}</span>
+      {loading ? <div className="loading-field">Loading Jira values…</div> : hasOptions ?
+        <select value={condition.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)}>
+          <option value="">Choose value…</option>
+          {options.map((item) => <option key={item.value} value={item.value}>{item.displayName}</option>)}
+        </select> :
+        <input value={condition.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)} placeholder="Enter Jira value" />}
+      <span className="hint-inline">{loading ? 'Reading values from Jira…' : hasOptions ? `${options.length} values loaded from Jira${source === 'field-metadata' ? ' configuration' : ''}.` : 'This field does not expose a fixed list; enter the value exactly as it appears in Jira.'}</span>
     </label>
     {canRemove && <button className="icon-danger condition-remove" onClick={() => onRemove(index)} title="Remove filter">×</button>}
   </div>;
@@ -246,7 +255,7 @@ function App() {
           <label>Public customer message<textarea rows="3" value={reminder.message} onChange={(e) => update(['reminders', index, 'message'], e.target.value)} /></label>
           <label className="participant-field">Add request participant(s)
             <input value={(reminder.participantAccountIds ?? []).join(', ')} onChange={(e) => updateParticipantIds(index, e.target.value)} placeholder="Atlassian account ID(s), comma separated" />
-            <span className="hint-inline">Participants are added before the public reminder comment. A searchable participant picker is the next UI refinement.</span>
+            <span className="hint-inline">Participants are added before the public reminder comment. A searchable participant picker is being added before Marketplace release.</span>
           </label>
         </div>
         <button className="icon-danger" onClick={() => removeReminder(index)} title="Remove reminder">×</button>
