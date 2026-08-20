@@ -8,7 +8,8 @@ const blankReminder = (afterDays = 2) => ({
   afterDays,
   message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.',
   destinationStatusName: '',
-  participantAccountIds: []
+  participantAccountIds: [],
+  participants: []
 });
 
 const emptyRule = (projectKey = '') => ({
@@ -35,7 +36,8 @@ function normaliseRule(rule) {
   next.reminders = (next.reminders ?? []).map((reminder) => ({
     ...reminder,
     destinationStatusName: reminder.destinationStatusName ?? '',
-    participantAccountIds: reminder.participantAccountIds ?? []
+    participantAccountIds: reminder.participantAccountIds ?? [],
+    participants: reminder.participants ?? []
   }));
   next.finalAction = { resolutionId: '', ...(next.finalAction ?? {}) };
   return next;
@@ -43,7 +45,6 @@ function normaliseRule(rule) {
 
 function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove }) {
   const [options, setOptions] = useState([]);
-  const [source, setSource] = useState('none');
   const [loading, setLoading] = useState(false);
   const field = fields.find((item) => item.id === condition.fieldId);
 
@@ -52,21 +53,14 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
     async function load() {
       if (!field?.id) {
         setOptions([]);
-        setSource('none');
         return;
       }
       setLoading(true);
       try {
         const result = await invoke('getFieldOptions', { fieldId: field.id, fieldName: field.name });
-        if (!cancelled) {
-          setOptions(result?.values ?? []);
-          setSource(result?.source ?? 'none');
-        }
+        if (!cancelled) setOptions(result?.values ?? []);
       } catch {
-        if (!cancelled) {
-          setOptions([]);
-          setSource('none');
-        }
+        if (!cancelled) setOptions([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -74,8 +68,6 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
     load();
     return () => { cancelled = true; };
   }, [field?.id]);
-
-  const hasOptions = options.length > 0;
 
   return <div className="condition-row">
     <label>Ticket field
@@ -91,15 +83,73 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
       </select>
     </label>
     <label>Value
-      {loading ? <div className="loading-field">Loading Jira values…</div> : hasOptions ?
+      {loading ? <div className="loading-field">Loading Jira values…</div> : options.length ?
         <select value={condition.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)}>
           <option value="">Choose value…</option>
-          {options.map((item) => <option key={item.value} value={item.value}>{item.displayName}</option>)}
+          {options.map((item) => <option key={`${item.value}-${item.displayName}`} value={item.value}>{item.displayName}</option>)}
         </select> :
         <input value={condition.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)} placeholder="Enter Jira value" />}
-      <span className="hint-inline">{loading ? 'Reading values from Jira…' : hasOptions ? `${options.length} values loaded from Jira${source === 'field-metadata' ? ' configuration' : ''}.` : 'This field does not expose a fixed list; enter the value exactly as it appears in Jira.'}</span>
+      <span className="hint-inline">{loading ? 'Reading values from Jira…' : options.length ? `${options.length} values loaded from Jira.` : 'No fixed values were returned. You can still enter the Jira value manually.'}</span>
     </label>
     {canRemove && <button className="icon-danger condition-remove" onClick={() => onRemove(index)} title="Remove filter">×</button>}
+  </div>;
+}
+
+function ParticipantPicker({ reminder, onChange }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const selected = reminder.participants ?? [];
+  const selectedIds = new Set(reminder.participantAccountIds ?? []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (query.trim().length < 2) {
+        setResults([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const response = await invoke('searchParticipants', { query });
+        if (!cancelled) setResults((response?.users ?? []).filter((user) => !selectedIds.has(user.accountId)));
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [query, (reminder.participantAccountIds ?? []).join('|')]);
+
+  function add(user) {
+    const participants = [...selected.filter((item) => item.accountId !== user.accountId), user];
+    const ids = [...new Set([...(reminder.participantAccountIds ?? []), user.accountId])];
+    onChange(participants, ids);
+    setQuery('');
+    setResults([]);
+  }
+
+  function remove(accountId) {
+    onChange(
+      selected.filter((item) => item.accountId !== accountId),
+      (reminder.participantAccountIds ?? []).filter((id) => id !== accountId)
+    );
+  }
+
+  return <div className="participant-picker">
+    <label>Add request participant(s)
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by customer or user name…" />
+    </label>
+    {loading && <div className="picker-status">Searching Jira…</div>}
+    {results.length > 0 && <div className="picker-results">{results.map((user) => <button type="button" key={user.accountId} onClick={() => add(user)}>
+      <span>{user.displayName}</span><small>{user.accountId}</small>
+    </button>)}</div>}
+    {(reminder.participantAccountIds ?? []).length > 0 && <div className="participant-chips">{(reminder.participantAccountIds ?? []).map((accountId) => {
+      const user = selected.find((item) => item.accountId === accountId);
+      return <span className="participant-chip" key={accountId}>{user?.displayName ?? accountId}<button type="button" onClick={() => remove(accountId)}>×</button></span>;
+    })}</div>}
+    <span className="hint-inline">Selected participants are added before the public reminder comment.</span>
   </div>;
 }
 
@@ -161,11 +211,6 @@ function App() {
 
   function removeReminder(index) {
     setEditing({ ...editing, reminders: editing.reminders.filter((_, i) => i !== index) });
-  }
-
-  function updateParticipantIds(index, text) {
-    const ids = text.split(',').map((item) => item.trim()).filter(Boolean);
-    update(['reminders', index, 'participantAccountIds'], ids);
   }
 
   async function save() {
@@ -253,10 +298,10 @@ function App() {
             <label>Change status after reminder<select value={reminder.destinationStatusName ?? ''} onChange={(e) => update(['reminders', index, 'destinationStatusName'], e.target.value)}><option value="">No status change</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
           </div>
           <label>Public customer message<textarea rows="3" value={reminder.message} onChange={(e) => update(['reminders', index, 'message'], e.target.value)} /></label>
-          <label className="participant-field">Add request participant(s)
-            <input value={(reminder.participantAccountIds ?? []).join(', ')} onChange={(e) => updateParticipantIds(index, e.target.value)} placeholder="Atlassian account ID(s), comma separated" />
-            <span className="hint-inline">Participants are added before the public reminder comment. A searchable participant picker is being added before Marketplace release.</span>
-          </label>
+          <ParticipantPicker reminder={reminder} onChange={(participants, ids) => {
+            update(['reminders', index, 'participants'], participants);
+            update(['reminders', index, 'participantAccountIds'], ids);
+          }} />
         </div>
         <button className="icon-danger" onClick={() => removeReminder(index)} title="Remove reminder">×</button>
       </div>)}</div>
@@ -271,7 +316,7 @@ function App() {
         <label>Resolution<select value={editing.finalAction.resolutionId ?? ''} onChange={(e) => update(['finalAction', 'resolutionId'], e.target.value)}><option value="">Do not set Resolution</option>{resolutions.map((resolution) => <option key={resolution.id} value={resolution.id}>{resolution.name}</option>)}</select></label>
         <div className="hint-box">Use this when the destination workflow transition requires Jira's <strong>Resolution</strong> field. Nuvriqo sends it as part of the transition.</div>
       </div>
-      <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and submits configured transition fields with it.</p>
+      <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and validates required workflow fields before transitioning.</p>
 
       <div className="footer-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save rule'}</button></div>
     </section>}
