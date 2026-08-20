@@ -10,6 +10,7 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Configurable waiting status.
 - [x] Multiple AND filters per rule (for example Client + Ticket Type).
 - [x] Jira filter-value loading from create metadata, observed issue values and autocomplete fallback.
+- [x] Filter-value deduplication.
 - [x] Different reminder counts/timings per rule.
 - [x] Day or hour timing.
 - [x] Configurable public customer reminder templates.
@@ -25,6 +26,8 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Audit history and user-visible processing errors.
 - [x] Retry-safe reminder action progress.
 - [x] Backward-compatible migration of stored development rules.
+- [x] Exact duplicate-rule protection.
+- [x] Automated core rule/template tests added.
 - [ ] Complete end-to-end sandbox test matrix.
 - [ ] Verify scheduled reminder delivery on multiple simultaneous issues.
 - [ ] Verify no duplicate reminders after retries/events.
@@ -36,13 +39,15 @@ This checklist tracks the minimum work needed to move the app from development i
 ## Marketplace / commercial
 
 - [ ] Decide Paid via Atlassian pricing.
-- [ ] Enable `app.licensing.enabled: true` before the Marketplace production build.
-- [ ] Add licence-state handling / reduced functionality for unlicensed installs.
+- [x] Enable `app.licensing.enabled: true` in the registered Forge manifest.
+- [x] Add production licence-state enforcement / reduced write-processing functionality for inactive licenses.
+- [ ] Test simulated active/inactive license states in development.
 - [ ] Create production Forge environment build.
-- [ ] Enable app sharing/distribution when ready for external beta.
+- [ ] Enable app sharing/distribution when ready for external beta/listing flow.
 - [ ] Create Marketplace listing.
 - [ ] Complete Privacy & Security tab.
 - [ ] Complete Partner verification requirements.
+- [ ] Complete app security questionnaire/security workflow.
 - [ ] Submit for Marketplace approval.
 
 ## Trust, privacy and security
@@ -50,45 +55,60 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] No external hosting required.
 - [x] No external data egress in V1.
 - [x] Rules, cycles and audit records stored using Forge KVS.
-- [x] Minimal classic scopes currently used for Jira/JSM functionality.
+- [x] KVS prefix queries paginate beyond 100 records.
+- [x] Audit records have 180-day TTL.
+- [x] Interactive Jira calls use `asUser()` where appropriate.
+- [x] Project-admin permission checks protect rule configuration.
+- [x] Edit Issues permission checks protect ticket-side cycle mutations.
+- [x] Participant display names/email addresses are not deliberately persisted.
+- [x] Personal-data account reference index implemented for fixed reminder participants.
+- [x] Weekly Forge Privacy API reporting/erasure flow implemented.
+- [x] `report:personal-data` scope added.
+- [x] Scope justification draft completed.
+- [x] Privacy Policy draft completed.
+- [x] Security Policy draft completed.
+- [x] Data retention/deletion documented.
 - [ ] Run `forge eligibility` / Runs on Atlassian eligibility checks on the production candidate.
 - [ ] Run dependency vulnerability scan before submission.
 - [ ] Publish Privacy Policy at a stable HTTPS URL.
-- [ ] Publish Security Policy / vulnerability reporting process.
+- [ ] Publish Security Policy / vulnerability reporting process at a stable HTTPS URL.
 - [ ] Publish Terms/EULA or select an appropriate Marketplace agreement option.
-- [ ] Document data retention/deletion behaviour.
-- [ ] Confirm GDPR user privacy reporting/deletion obligations for any stored personal data.
 
 ## Support and documentation
 
 - [ ] Finalise support email address.
 - [ ] Finalise support website/help centre URL.
-- [ ] Publish installation guide.
-- [ ] Publish configuration guide.
-- [ ] Publish troubleshooting guide.
-- [ ] Define support hours and target response time.
-- [ ] Add release notes / changelog.
+- [x] Installation guide drafted.
+- [x] Configuration guide drafted.
+- [x] Troubleshooting guide drafted.
+- [x] Support policy draft created.
+- [x] Release notes / changelog created.
+- [x] Release test matrix created.
+- [ ] Publish customer-facing guides to the final support/help-centre URLs.
+- [ ] Confirm final support hours and target response time.
 
 ## Marketplace assets
 
 - [ ] Final app icon/logo.
 - [ ] Marketplace hero/banner artwork if required.
 - [ ] Screenshot: rules list.
-- [ ] Screenshot: Hardware rule with multiple reminders.
-- [ ] Screenshot: issue follow-up panel.
-- [ ] Screenshot: audit history.
-- [ ] Concise Marketplace summary.
-- [ ] Full Marketplace description.
-- [ ] Feature list and use cases.
+- [ ] Screenshot: Client + Ticket Type rule with multiple reminders.
+- [ ] Screenshot: reminder status/participant actions.
+- [ ] Screenshot: final Resolution action.
+- [ ] Screenshot: issue follow-up panel/audit history.
+- [x] Concise Marketplace summary drafted.
+- [x] Full Marketplace description drafted.
+- [x] Feature list and use cases drafted.
 
-## Recommended launch sequence
+## Release candidate sequence
 
-1. Complete sandbox functional testing.
-2. Fix all P0/P1 defects found during testing.
-3. Freeze V1 features.
-4. Add licensing and production configuration.
-5. Prepare support/privacy/security URLs and listing assets.
-6. Run final security, lint and eligibility checks.
-7. Deploy production build.
-8. Create/link Marketplace listing.
-9. Submit for Atlassian review.
+1. Pull/deploy 0.9.0 to the sandbox and upgrade scopes.
+2. Run `npm test`, UI build and `forge lint`.
+3. Execute `docs/RELEASE_TEST_MATRIX.md` against fast Hours-based rules.
+4. Fix any P0/P1 defects; freeze V1 features.
+5. Confirm pricing/support/legal URLs and publish docs.
+6. Run vulnerability and Runs on Atlassian eligibility checks.
+7. Capture final Marketplace screenshots/assets.
+8. Deploy the production Forge version (do not install it simply for testing once paid production billing applies).
+9. Create/link the Marketplace listing and complete Privacy & Security/security questionnaires.
+10. Submit for Atlassian review.
