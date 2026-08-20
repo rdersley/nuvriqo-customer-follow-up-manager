@@ -3,7 +3,16 @@ import { selectRule } from './rules.js';
 import { appendAudit, deleteCycle, getCycle, saveCycle } from './storage.js';
 import { buildTemplateContext, renderTemplate } from './templates.js';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+function unitMs(rule) {
+  return rule?.timingUnit === 'hours' ? HOUR_MS : DAY_MS;
+}
+
+export function elapsedUnits(startedAt, rule, now = new Date()) {
+  return Math.floor((now.getTime() - new Date(startedAt).getTime()) / unitMs(rule));
+}
 
 export function elapsedDays(startedAt, now = new Date()) {
   return Math.floor((now.getTime() - new Date(startedAt).getTime()) / DAY_MS);
@@ -57,31 +66,44 @@ export async function processCycle(cycle, rule, now = new Date()) {
     return { action: 'cancelled' };
   }
 
-  const days = elapsedDays(cycle.startedAt, now);
+  const waitingAmount = elapsedUnits(cycle.startedAt, rule, now);
+  const daysWaiting = elapsedDays(cycle.startedAt, now);
   const completed = new Set(cycle.completedReminderIndexes ?? []);
 
   for (let index = 0; index < (rule.reminders ?? []).length; index += 1) {
     const reminder = rule.reminders[index];
-    if (!completed.has(index) && days >= Number(reminder.afterDays)) {
-      const context = buildTemplateContext(issue, cycle, days);
+    if (!completed.has(index) && waitingAmount >= Number(reminder.afterDays)) {
+      const context = buildTemplateContext(issue, cycle, {
+        daysWaiting,
+        waitingAmount,
+        waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
+      });
       const message = renderTemplate(reminder.message, context);
       await addPublicCustomerComment(cycle.issueKey, message);
       completed.add(index);
       cycle.completedReminderIndexes = [...completed].sort((a, b) => a - b);
       await saveCycle(cycle);
-      await appendAudit(cycle.issueId, 'reminder-sent', { issueKey: cycle.issueKey, ruleId: rule.id, reminderIndex: index, afterDays: reminder.afterDays });
+      await appendAudit(cycle.issueId, 'reminder-sent', {
+        issueKey: cycle.issueKey,
+        ruleId: rule.id,
+        reminderIndex: index,
+        after: reminder.afterDays,
+        timingUnit: rule?.timingUnit ?? 'days'
+      });
       return { action: 'reminder', reminderIndex: index };
     }
   }
 
-  if (days >= Number(rule.finalAction.afterDays)) {
+  if (waitingAmount >= Number(rule.finalAction.afterDays)) {
     const transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName);
     await deleteCycle(cycle.issueId);
     await appendAudit(cycle.issueId, 'auto-transitioned', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
       destinationStatusName: rule.finalAction.destinationStatusName,
-      transitionId: transition.id
+      transitionId: transition.id,
+      after: rule.finalAction.afterDays,
+      timingUnit: rule?.timingUnit ?? 'days'
     });
     return { action: 'transitioned', transitionId: transition.id };
   }
