@@ -1,5 +1,10 @@
-import { getIssue, addPublicCustomerComment, transitionToStatus } from './jira.js';
-import { selectRule } from './rules.js';
+import {
+  addPublicCustomerComment,
+  addRequestParticipants,
+  getIssue,
+  transitionToStatus
+} from './jira.js';
+import { cycleStillMatchesRule, selectRule } from './rules.js';
 import { appendAudit, deleteCycle, getCycle, saveCycle } from './storage.js';
 import { buildTemplateContext, renderTemplate } from './templates.js';
 
@@ -24,6 +29,8 @@ export async function reconcileIssue(issue, rules) {
 
   if (!rule) {
     if (existing?.active) {
+      const existingRule = (rules ?? []).find((item) => item.id === existing.ruleId);
+      if (existingRule && cycleStillMatchesRule(existingRule, issue)) return existing;
       await deleteCycle(issue.id);
       await appendAudit(issue.id, 'cycle-cancelled', { issueKey: issue.key, reason: 'Issue no longer matches an enabled follow-up rule' });
     }
@@ -40,7 +47,8 @@ export async function reconcileIssue(issue, rules) {
     paused: false,
     pausedAt: null,
     startedAt: new Date().toISOString(),
-    completedReminderIndexes: []
+    completedReminderIndexes: [],
+    reminderProgress: {}
   };
   await saveCycle(cycle);
   await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name });
@@ -55,14 +63,65 @@ export async function cancelForCustomerReply(issueId, issueKey) {
   return true;
 }
 
+async function processReminderActions(cycle, rule, issue, reminder, index, context) {
+  cycle.reminderProgress ??= {};
+  const progress = cycle.reminderProgress[index] ?? {};
+
+  if (!progress.participantsAdded && (reminder.participantAccountIds ?? []).length) {
+    await addRequestParticipants(cycle.issueKey, reminder.participantAccountIds);
+    progress.participantsAdded = true;
+    cycle.reminderProgress[index] = progress;
+    await saveCycle(cycle);
+    await appendAudit(cycle.issueId, 'participants-added', {
+      issueKey: cycle.issueKey,
+      ruleId: rule.id,
+      reminderIndex: index,
+      accountIds: reminder.participantAccountIds
+    });
+  } else if (!progress.participantsAdded) {
+    progress.participantsAdded = true;
+  }
+
+  if (!progress.commentSent) {
+    const message = renderTemplate(reminder.message, context);
+    await addPublicCustomerComment(cycle.issueKey, message);
+    progress.commentSent = true;
+    cycle.reminderProgress[index] = progress;
+    await saveCycle(cycle);
+    await appendAudit(cycle.issueId, 'reminder-comment-sent', {
+      issueKey: cycle.issueKey,
+      ruleId: rule.id,
+      reminderIndex: index
+    });
+  }
+
+  if (!progress.statusChanged && reminder.destinationStatusName) {
+    const transition = await transitionToStatus(cycle.issueKey, reminder.destinationStatusName);
+    progress.statusChanged = true;
+    cycle.reminderProgress[index] = progress;
+    await saveCycle(cycle);
+    await appendAudit(cycle.issueId, 'reminder-transitioned', {
+      issueKey: cycle.issueKey,
+      ruleId: rule.id,
+      reminderIndex: index,
+      destinationStatusName: reminder.destinationStatusName,
+      transitionId: transition.id
+    });
+  } else if (!progress.statusChanged) {
+    progress.statusChanged = true;
+  }
+
+  cycle.reminderProgress[index] = progress;
+  return progress;
+}
+
 export async function processCycle(cycle, rule, now = new Date()) {
   if (cycle.paused) return { action: 'paused' };
 
   const issue = await getIssue(cycle.issueKey);
-  const stillMatches = selectRule([rule], issue);
-  if (!stillMatches) {
+  if (!cycleStillMatchesRule(rule, issue)) {
     await deleteCycle(cycle.issueId);
-    await appendAudit(cycle.issueId, 'cycle-cancelled', { issueKey: cycle.issueKey, reason: 'Issue no longer matches rule' });
+    await appendAudit(cycle.issueId, 'cycle-cancelled', { issueKey: cycle.issueKey, reason: 'Issue no longer matches rule or configured reminder statuses' });
     return { action: 'cancelled' };
   }
 
@@ -78,12 +137,11 @@ export async function processCycle(cycle, rule, now = new Date()) {
         waitingAmount,
         waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
       });
-      const message = renderTemplate(reminder.message, context);
-      await addPublicCustomerComment(cycle.issueKey, message);
+      await processReminderActions(cycle, rule, issue, reminder, index, context);
       completed.add(index);
       cycle.completedReminderIndexes = [...completed].sort((a, b) => a - b);
       await saveCycle(cycle);
-      await appendAudit(cycle.issueId, 'reminder-sent', {
+      await appendAudit(cycle.issueId, 'reminder-completed', {
         issueKey: cycle.issueKey,
         ruleId: rule.id,
         reminderIndex: index,
@@ -95,13 +153,23 @@ export async function processCycle(cycle, rule, now = new Date()) {
   }
 
   if (waitingAmount >= Number(rule.finalAction.afterDays)) {
-    const transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName);
+    const transitionFields = {};
+    if (rule.finalAction.resolutionId) transitionFields.resolution = { id: rule.finalAction.resolutionId };
+    else if (rule.finalAction.resolutionName) transitionFields.resolution = { name: rule.finalAction.resolutionName };
+    Object.assign(transitionFields, rule.finalAction.fields ?? {});
+
+    const transition = await transitionToStatus(
+      cycle.issueKey,
+      rule.finalAction.destinationStatusName,
+      transitionFields
+    );
     await deleteCycle(cycle.issueId);
     await appendAudit(cycle.issueId, 'auto-transitioned', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
       destinationStatusName: rule.finalAction.destinationStatusName,
       transitionId: transition.id,
+      resolutionId: rule.finalAction.resolutionId ?? null,
       after: rule.finalAction.afterDays,
       timingUnit: rule?.timingUnit ?? 'days'
     });
