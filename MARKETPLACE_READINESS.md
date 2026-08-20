@@ -8,17 +8,23 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Project settings page.
 - [x] Multiple follow-up rules per project.
 - [x] Configurable waiting status.
-- [x] Configurable Jira field condition.
-- [x] Jira field-value suggestions with free-text fallback.
+- [x] Multiple AND filters per rule (for example Client + Ticket Type).
+- [x] Jira filter-value loading from create metadata, observed issue values and autocomplete fallback.
 - [x] Different reminder counts/timings per rule.
 - [x] Day or hour timing.
 - [x] Configurable public customer reminder templates.
+- [x] Optional request participants per reminder.
+- [x] Searchable Jira user/customer participant picker.
+- [x] Optional status change per reminder.
 - [x] Configurable final destination status.
-- [x] Runtime workflow transition discovery.
+- [x] Optional Resolution value on final transition.
+- [x] Runtime workflow transition discovery and required-field validation.
 - [x] Customer reporter reply cancellation.
 - [x] Request participant reply cancellation.
 - [x] Pause / resume / cancel / restart controls.
-- [x] Audit history.
+- [x] Audit history and user-visible processing errors.
+- [x] Retry-safe reminder action progress.
+- [x] Backward-compatible migration of stored development rules.
 - [ ] Complete end-to-end sandbox test matrix.
 - [ ] Verify scheduled reminder delivery on multiple simultaneous issues.
 - [ ] Verify no duplicate reminders after retries/events.
