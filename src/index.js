@@ -1,4 +1,4 @@
-import { getIssue, getRequestComment } from './jira.js';
+import { getIssue, getRequestComment, getRequestParticipants } from './jira.js';
 import { cancelForCustomerReply, processCycle, reconcileIssue } from './followups.js';
 import { getActiveCycles, getRules } from './storage.js';
 
@@ -23,18 +23,22 @@ export async function onCommentCreated(event) {
   const commentId = event?.comment?.id;
   if (!issueKey || !issueId || !commentId) return;
 
-  // Read the JSM comment so visibility is authoritative. For V1 a public reply
-  // from the reporter cancels the sequence. Request-participant detection is
-  // intentionally kept as a follow-on enhancement rather than guessing from
-  // Jira's generic comment event payload.
-  const [issue, requestComment] = await Promise.all([
+  const [issue, requestComment, participants] = await Promise.all([
     getIssue(issueKey),
-    getRequestComment(issueKey, commentId)
+    getRequestComment(issueKey, commentId),
+    getRequestParticipants(issueKey).catch(() => [])
   ]);
+
+  if (requestComment?.public !== true) return;
 
   const reporterId = issue?.fields?.reporter?.accountId;
   const authorId = requestComment?.author?.accountId;
-  if (requestComment?.public === true && reporterId && authorId === reporterId) {
+  if (!authorId) return;
+
+  const participantIds = new Set((participants ?? []).map((participant) => participant?.accountId).filter(Boolean));
+  const isCustomerReply = authorId === reporterId || participantIds.has(authorId);
+
+  if (isCustomerReply) {
     await cancelForCustomerReply(issueId, issueKey);
   }
 }
