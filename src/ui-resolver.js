@@ -30,6 +30,16 @@ function issueKeyFromContext(context) {
   return context?.extension?.issue?.key ?? context?.issue?.key ?? null;
 }
 
+function licenseAllows(context) {
+  return context?.license == null || context.license.active === true;
+}
+
+function ensureLicensedForWrite(context) {
+  if (!licenseAllows(context)) {
+    throw new Error('Nuvriqo requires an active Marketplace license to change rules or follow-up cycles.');
+  }
+}
+
 function stripOuterQuotes(value) {
   const text = String(value ?? '').trim();
   if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
@@ -79,8 +89,6 @@ function optionKey(option) {
     .toLowerCase();
 }
 
-// Source order is intentional: Jira field metadata is the most authoritative,
-// followed by values observed on tickets, then JQL autocomplete suggestions.
 function mergeOptions(...groups) {
   const map = new Map();
   for (const group of groups) {
@@ -239,6 +247,7 @@ resolver.define('getProjectSetup', async ({ context }) => {
 
   return {
     projectKey,
+    licensed: licenseAllows(context),
     fields: (fields ?? [])
       .filter((field) => field?.id && field?.name)
       .map((field) => ({
@@ -306,6 +315,7 @@ resolver.define('searchParticipants', async ({ payload, context }) => {
 });
 
 resolver.define('saveRule', async ({ payload, context }) => {
+  ensureLicensedForWrite(context);
   const projectKey = projectKeyFromContext(context);
   if (!projectKey) throw new Error('Project context is unavailable');
   await ensureProjectAdmin(projectKey);
@@ -334,6 +344,7 @@ resolver.define('saveRule', async ({ payload, context }) => {
 });
 
 resolver.define('deleteRule', async ({ payload, context }) => {
+  ensureLicensedForWrite(context);
   const projectKey = projectKeyFromContext(context);
   if (!projectKey) throw new Error('Project context is unavailable');
   await ensureProjectAdmin(projectKey);
@@ -357,6 +368,7 @@ resolver.define('getIssuePanel', async ({ context }) => {
   const rule = cycle ? rules.find((item) => item.id === cycle.ruleId) ?? null : null;
 
   return {
+    licensed: licenseAllows(context),
     issue: {
       id: issue.id,
       key: issue.key,
@@ -370,6 +382,7 @@ resolver.define('getIssuePanel', async ({ context }) => {
 });
 
 async function issueForCycleAction(context) {
+  ensureLicensedForWrite(context);
   const issueKey = issueKeyFromContext(context);
   if (!issueKey) throw new Error('Issue context is unavailable');
   await ensureCanEditIssue(issueKey);
