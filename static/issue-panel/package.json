@@ -6,6 +6,7 @@
   "scripts": { "build": "vite build" },
   "dependencies": {
     "@forge/bridge": "latest",
+    "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest"
