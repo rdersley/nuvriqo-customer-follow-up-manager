@@ -35,14 +35,16 @@ resolver.define('getProjectSetup', async ({ context }) => {
   const projectKey = projectKeyFromContext(context);
   if (!projectKey) throw new Error('Project context is unavailable');
 
-  const [fieldsResponse, statusesResponse, rules] = await Promise.all([
+  const [fieldsResponse, statusesResponse, resolutionsResponse, rules] = await Promise.all([
     api.asApp().requestJira(route`/rest/api/3/field`),
     api.asApp().requestJira(route`/rest/api/3/project/${projectKey}/statuses`),
+    api.asApp().requestJira(route`/rest/api/3/resolution`),
     getRules()
   ]);
 
   const fields = await readJson(fieldsResponse, 'Load Jira fields');
   const statusGroups = await readJson(statusesResponse, 'Load project statuses');
+  const resolutions = resolutionsResponse.ok ? await resolutionsResponse.json() : [];
   const statusMap = new Map();
   for (const issueType of statusGroups ?? []) {
     for (const status of issueType.statuses ?? []) {
@@ -63,6 +65,7 @@ resolver.define('getProjectSetup', async ({ context }) => {
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     statuses: [...statusMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    resolutions: (resolutions ?? []).map((resolution) => ({ id: resolution.id, name: resolution.name })).sort((a, b) => a.name.localeCompare(b.name)),
     rules: rules.filter((rule) => rule.projectKey === projectKey)
   };
 });
@@ -76,11 +79,7 @@ resolver.define('getFieldSuggestions', async ({ payload }) => {
     ? await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}&fieldValue=${fieldValue}`)
     : await api.asApp().requestJira(route`/rest/api/3/jql/autocompletedata/suggestions?fieldName=${fieldName}`);
 
-  if (!response.ok) {
-    // Some Jira field types do not expose suggestions. The UI deliberately
-    // falls back to free text so those fields remain usable.
-    return { values: [] };
-  }
+  if (!response.ok) return { values: [] };
 
   const data = await response.json();
   const values = (data?.results ?? [])
