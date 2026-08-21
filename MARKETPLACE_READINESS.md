@@ -31,7 +31,7 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Automated core rule/template tests added.
 - [x] Live JSM QA: TEST-1 matched two Labels filters and received one scheduled public reminder from the Forge app.
 - [x] Live JSM QA: reminder template substituted {{issue.key}} correctly and left status unchanged when configured for no reminder transition.
-- [x] Live JSM QA: public JSM reply created with `jsdPublic: true` to exercise customer-reply cancellation.
+- [x] Live JSM QA: public JSM reporter reply (`jsdPublic: true`) cancelled the active cycle; TEST-1 remained Pending with no Resolution after the configured final-action window passed.
 - [ ] Complete end-to-end sandbox test matrix.
 - [ ] Verify scheduled reminder delivery on multiple simultaneous issues.
 - [ ] Verify no duplicate reminders after retries/events across repeated scheduler runs.
@@ -114,7 +114,8 @@ This checklist tracks the minimum work needed to move the app from development i
 - QA filters: `Labels = client-ryanair` AND `Labels = type-hardware`
 - Waiting status: `Pending`
 - First scheduled public reminder successfully posted by Nuvriqo on 21 Aug 2026.
-- Public reporter reply has been posted; leave TEST-1 untouched until the configured final-action window passes to confirm cancellation prevents auto-transition.
+- Customer-reply cancellation verified: TEST-1 remained Pending and unresolved after the final-action window.
+- TEST-1 has been reset through In Progress and re-entered Pending to create a fresh no-reply cycle for final Done + Resolution validation.
 
 ## Release candidate sequence
 
