@@ -19,6 +19,7 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Optional status change per reminder.
 - [x] Configurable final destination status.
 - [x] Optional Resolution value on final transition.
+- [x] Advanced additional final-transition fields (text, number, boolean or Jira JSON object).
 - [x] Runtime workflow transition discovery and required-field validation.
 - [x] Customer reporter reply cancellation.
 - [x] Request participant reply cancellation.
@@ -28,9 +29,15 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Backward-compatible migration of stored development rules.
 - [x] Exact duplicate-rule protection.
 - [x] Automated core rule/template tests added.
+- [x] Live JSM QA: TEST-1 matched two Labels filters and received one scheduled public reminder from the Forge app.
+- [x] Live JSM QA: reminder template substituted {{issue.key}} correctly and left status unchanged when configured for no reminder transition.
+- [x] Live JSM QA: public JSM reply created with `jsdPublic: true` to exercise customer-reply cancellation.
 - [ ] Complete end-to-end sandbox test matrix.
 - [ ] Verify scheduled reminder delivery on multiple simultaneous issues.
-- [ ] Verify no duplicate reminders after retries/events.
+- [ ] Verify no duplicate reminders after retries/events across repeated scheduler runs.
+- [ ] Verify final Done transition with required Resolution.
+- [ ] Verify per-reminder status transition.
+- [ ] Verify fixed request-participant addition.
 - [ ] Verify transition failure handling and user-visible diagnostics.
 - [ ] Verify behaviour when rule is edited during an active cycle.
 - [ ] Verify disabled/deleted rule behaviour for active cycles.
@@ -65,48 +72,57 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Weekly Forge Privacy API reporting/erasure flow implemented.
 - [x] `report:personal-data` scope added.
 - [x] Scope justification draft completed.
-- [x] Privacy Policy draft completed.
-- [x] Security Policy draft completed.
+- [x] Privacy Policy draft completed and published in Nuvriqo Support Confluence.
+- [x] Product-specific Data & Security page published in Nuvriqo Support Confluence.
 - [x] Data retention/deletion documented.
 - [ ] Run `forge eligibility` / Runs on Atlassian eligibility checks on the production candidate.
 - [ ] Run dependency vulnerability scan before submission.
-- [ ] Publish Privacy Policy at a stable HTTPS URL.
-- [ ] Publish Security Policy / vulnerability reporting process at a stable HTTPS URL.
+- [ ] Publish/finalise Security Policy / vulnerability reporting process at a stable HTTPS URL.
 - [ ] Publish Terms/EULA or select an appropriate Marketplace agreement option.
 
 ## Support and documentation
 
 - [ ] Finalise support email address.
 - [ ] Finalise support website/help centre URL.
-- [x] Installation guide drafted.
-- [x] Configuration guide drafted.
-- [x] Troubleshooting guide drafted.
-- [x] Support policy draft created.
-- [x] Release notes / changelog created.
-- [x] Release test matrix created.
-- [ ] Publish customer-facing guides to the final support/help-centre URLs.
+- [x] Follow-Up Manager product overview published.
+- [x] Getting Started guide published.
+- [x] Administrator Guide published.
+- [x] Troubleshooting guide published.
+- [x] Product-specific Data & Security page published.
+- [x] Release notes published.
+- [x] Release test matrix created in the repository.
 - [ ] Confirm final support hours and target response time.
 
 ## Marketplace assets
 
 - [ ] Final app icon/logo.
 - [ ] Marketplace hero/banner artwork if required.
-- [ ] Screenshot: rules list.
+- [x] Screenshot candidate: rules list / multi-filter QA rule available from TEST project.
 - [ ] Screenshot: Client + Ticket Type rule with multiple reminders.
 - [ ] Screenshot: reminder status/participant actions.
-- [ ] Screenshot: final Resolution action.
+- [ ] Screenshot: final Resolution + advanced transition fields.
 - [ ] Screenshot: issue follow-up panel/audit history.
 - [x] Concise Marketplace summary drafted.
 - [x] Full Marketplace description drafted.
 - [x] Feature list and use cases drafted.
 
+## Current live QA environment
+
+- Site: `nuvriqo.atlassian.net`
+- JSM project: `TEST` (Testing)
+- Genuine JSM request: `TEST-1`
+- QA filters: `Labels = client-ryanair` AND `Labels = type-hardware`
+- Waiting status: `Pending`
+- First scheduled public reminder successfully posted by Nuvriqo on 21 Aug 2026.
+- Public reporter reply has been posted; leave TEST-1 untouched until the configured final-action window passes to confirm cancellation prevents auto-transition.
+
 ## Release candidate sequence
 
-1. Pull/deploy 0.9.0 to the sandbox and upgrade scopes.
+1. Pull/deploy the latest RC to the Nuvriqo development installation and upgrade scopes if requested.
 2. Run `npm test`, UI build and `forge lint`.
-3. Execute `docs/RELEASE_TEST_MATRIX.md` against fast Hours-based rules.
+3. Continue `docs/RELEASE_TEST_MATRIX.md` against the TEST project using Hours-based rules.
 4. Fix any P0/P1 defects; freeze V1 features.
-5. Confirm pricing/support/legal URLs and publish docs.
+5. Confirm pricing/support/legal URLs and publish/finalise docs.
 6. Run vulnerability and Runs on Atlassian eligibility checks.
 7. Capture final Marketplace screenshots/assets.
 8. Deploy the production Forge version (do not install it simply for testing once paid production billing applies).
