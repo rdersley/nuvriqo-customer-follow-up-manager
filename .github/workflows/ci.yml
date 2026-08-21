@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test-and-build:
+  core-tests:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -23,5 +23,36 @@ jobs:
       - name: Run core tests
         run: npm test
 
-      - name: Build Custom UI resources
-        run: npm run build:ui
+  admin-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install admin UI dependencies
+        run: npm --prefix static/admin install
+
+      - name: Build admin UI
+        run: npm --prefix static/admin run build
+
+  issue-panel-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install issue panel dependencies
+        run: npm --prefix static/issue-panel install
+
+      - name: Build issue panel UI
+        run: npm --prefix static/issue-panel run build
