@@ -4,6 +4,7 @@ import { invoke } from '@forge/bridge';
 import './styles.css';
 
 const blankCondition = () => ({ fieldId: '', operator: 'equals', value: '' });
+const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '' });
 const blankReminder = (afterDays = 2) => ({
   afterDays,
   message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.',
@@ -22,8 +23,21 @@ const emptyRule = (projectKey = '') => ({
   timingUnit: 'days',
   conditions: [blankCondition()],
   reminders: [blankReminder(2)],
-  finalAction: { afterDays: 7, destinationStatusName: '', resolutionId: '' }
+  finalAction: {
+    afterDays: 7,
+    destinationStatusName: '',
+    resolutionId: '',
+    fields: {},
+    fieldEntries: []
+  }
 });
+
+function valueToEntry(fieldId, value) {
+  if (typeof value === 'number') return { fieldId, format: 'number', value: String(value) };
+  if (typeof value === 'boolean') return { fieldId, format: 'boolean', value: String(value) };
+  if (value !== null && typeof value === 'object') return { fieldId, format: 'json', value: JSON.stringify(value) };
+  return { fieldId, format: 'text', value: value == null ? '' : String(value) };
+}
 
 function normaliseRule(rule) {
   const next = structuredClone(rule);
@@ -39,8 +53,32 @@ function normaliseRule(rule) {
     participantAccountIds: reminder.participantAccountIds ?? [],
     participants: reminder.participants ?? []
   }));
-  next.finalAction = { resolutionId: '', ...(next.finalAction ?? {}) };
+  next.finalAction = { resolutionId: '', fields: {}, ...(next.finalAction ?? {}) };
+  next.finalAction.fieldEntries = Object.entries(next.finalAction.fields ?? {})
+    .filter(([fieldId]) => fieldId !== 'resolution')
+    .map(([fieldId, value]) => valueToEntry(fieldId, value));
   return next;
+}
+
+function parseTransitionField(entry) {
+  const raw = entry.value ?? '';
+  switch (entry.format ?? 'text') {
+    case 'number': {
+      const value = Number(raw);
+      if (!Number.isFinite(value)) throw new Error(`Transition field ${entry.fieldId} must be a valid number.`);
+      return value;
+    }
+    case 'boolean':
+      return String(raw).toLowerCase() === 'true';
+    case 'json':
+      try {
+        return JSON.parse(raw);
+      } catch {
+        throw new Error(`Transition field ${entry.fieldId} contains invalid JSON.`);
+      }
+    default:
+      return String(raw);
+  }
 }
 
 function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove }) {
@@ -213,12 +251,53 @@ function App() {
     setEditing({ ...editing, reminders: editing.reminders.filter((_, i) => i !== index) });
   }
 
+  function addTransitionField() {
+    setEditing((current) => {
+      const next = structuredClone(current);
+      next.finalAction.fieldEntries ??= [];
+      next.finalAction.fieldEntries.push(blankTransitionField());
+      return next;
+    });
+  }
+
+  function updateTransitionField(index, key, value) {
+    setEditing((current) => {
+      const next = structuredClone(current);
+      next.finalAction.fieldEntries ??= [];
+      next.finalAction.fieldEntries[index][key] = value;
+      return next;
+    });
+  }
+
+  function removeTransitionField(index) {
+    setEditing((current) => {
+      const next = structuredClone(current);
+      next.finalAction.fieldEntries = (next.finalAction.fieldEntries ?? []).filter((_, i) => i !== index);
+      return next;
+    });
+  }
+
   async function save() {
     setBusy(true); setMessage('');
     try {
       const clean = structuredClone(editing);
       clean.conditions = clean.conditions.filter((condition) => condition.fieldId);
       delete clean.condition;
+
+      const fields = {};
+      for (const entry of clean.finalAction.fieldEntries ?? []) {
+        if (!entry.fieldId) continue;
+        if (entry.fieldId === 'resolution') {
+          throw new Error('Use the Resolution dropdown instead of adding Resolution as an advanced transition field.');
+        }
+        if (String(entry.value ?? '').trim() === '') {
+          throw new Error(`Enter a value for transition field ${entry.fieldId}.`);
+        }
+        fields[entry.fieldId] = parseTransitionField(entry);
+      }
+      clean.finalAction.fields = fields;
+      delete clean.finalAction.fieldEntries;
+
       const result = await invoke('saveRule', { rule: clean });
       if (!result.ok) {
         setMessage(result.errors.join(' • '));
@@ -316,6 +395,33 @@ function App() {
         <label>Resolution<select value={editing.finalAction.resolutionId ?? ''} onChange={(e) => update(['finalAction', 'resolutionId'], e.target.value)}><option value="">Do not set Resolution</option>{resolutions.map((resolution) => <option key={resolution.id} value={resolution.id}>{resolution.name}</option>)}</select></label>
         <div className="hint-box">Use this when the destination workflow transition requires Jira's <strong>Resolution</strong> field. Nuvriqo sends it as part of the transition.</div>
       </div>
+
+      <div className="section-head"><h3>Advanced transition fields</h3><button type="button" onClick={addTransitionField}>+ Add field</button></div>
+      <p className="hint">Optional. Use this only when the final Jira workflow transition requires fields in addition to Resolution. For select/user/custom fields, JSON can be used to send Jira's expected object shape (for example <code>{'{"id":"10000"}'}</code>).</p>
+      {(editing.finalAction.fieldEntries ?? []).length === 0 ? <div className="empty">No additional transition fields configured.</div> :
+        <div className="conditions">{(editing.finalAction.fieldEntries ?? []).map((entry, index) => <div className="condition-row" key={index}>
+          <label>Jira field
+            <select value={entry.fieldId} onChange={(e) => updateTransitionField(index, 'fieldId', e.target.value)}>
+              <option value="">Choose field…</option>
+              {fieldOptions.filter((field) => field.id !== 'resolution').map((field) => <option key={field.id} value={field.id}>{field.name}</option>)}
+            </select>
+          </label>
+          <label>Value type
+            <select value={entry.format ?? 'text'} onChange={(e) => updateTransitionField(index, 'format', e.target.value)}>
+              <option value="text">Text</option>
+              <option value="number">Number</option>
+              <option value="boolean">Boolean</option>
+              <option value="json">JSON / Jira object</option>
+            </select>
+          </label>
+          <label>Value
+            {entry.format === 'boolean' ?
+              <select value={entry.value ?? 'true'} onChange={(e) => updateTransitionField(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
+              <input value={entry.value ?? ''} onChange={(e) => updateTransitionField(index, 'value', e.target.value)} placeholder={entry.format === 'json' ? '{"id":"10000"}' : 'Transition value'} />}
+          </label>
+          <button className="icon-danger condition-remove" type="button" onClick={() => removeTransitionField(index)} title="Remove transition field">×</button>
+        </div>)}</div>}
+
       <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and validates required workflow fields before transitioning.</p>
 
       <div className="footer-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save rule'}</button></div>
