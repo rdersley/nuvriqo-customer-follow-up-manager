@@ -32,10 +32,12 @@ This checklist tracks the minimum work needed to move the app from development i
 - [x] Live JSM QA: TEST-1 matched two Labels filters and received one scheduled public reminder from the Forge app.
 - [x] Live JSM QA: reminder template substituted {{issue.key}} correctly and left status unchanged when configured for no reminder transition.
 - [x] Live JSM QA: public JSM reporter reply (`jsdPublic: true`) cancelled the active cycle; TEST-1 remained Pending with no Resolution after the configured final-action window passed.
+- [x] Live JSM QA: a fresh cycle started after TEST-1 left and re-entered Pending and produced exactly one new scheduled reminder.
+- [x] Live JSM QA: no-reply cycle completed automatically at 16:17 on 21 Aug 2026, transitioning TEST-1 from Pending to Done and setting required Resolution = Done in the same app-driven transition.
 - [ ] Complete end-to-end sandbox test matrix.
 - [ ] Verify scheduled reminder delivery on multiple simultaneous issues.
-- [ ] Verify no duplicate reminders after retries/events across repeated scheduler runs.
-- [ ] Verify final Done transition with required Resolution.
+- [x] Verify no duplicate reminders after retries/events across repeated scheduler runs for the tested TEST-1 cycles.
+- [x] Verify final Done transition with required Resolution.
 - [ ] Verify per-reminder status transition.
 - [ ] Verify fixed request-participant addition.
 - [ ] Verify transition failure handling and user-visible diagnostics.
@@ -113,9 +115,10 @@ This checklist tracks the minimum work needed to move the app from development i
 - Genuine JSM request: `TEST-1`
 - QA filters: `Labels = client-ryanair` AND `Labels = type-hardware`
 - Waiting status: `Pending`
-- First scheduled public reminder successfully posted by Nuvriqo on 21 Aug 2026.
-- Customer-reply cancellation verified: TEST-1 remained Pending and unresolved after the final-action window.
-- TEST-1 has been reset through In Progress and re-entered Pending to create a fresh no-reply cycle for final Done + Resolution validation.
+- Scheduled public reminder successfully posted by Nuvriqo on 21 Aug 2026.
+- Customer-reply cancellation verified on the first cycle.
+- Fresh-cycle restart verified after leaving and re-entering Pending.
+- No-reply final action verified at 16:17 on 21 Aug 2026: Nuvriqo transitioned TEST-1 from Pending to Done and populated Resolution = Done.
 
 ## Release candidate sequence
 
