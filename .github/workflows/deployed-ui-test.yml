@@ -5,6 +5,9 @@ on:
     branches: [automation/playwright-ui-tests]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: follow-up-manager-deployed-ui
   cancel-in-progress: true
