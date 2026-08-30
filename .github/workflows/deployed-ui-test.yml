@@ -2,14 +2,19 @@ name: Deployed UI Tests
 
 on:
   push:
-    branches: [automation/playwright-ui-tests]
+    branches:
+      - main
+      - automation/playwright-ui-tests
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: follow-up-manager-deployed-ui
+  group: follow-up-manager-deployed-ui-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
