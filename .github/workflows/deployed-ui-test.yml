@@ -1,0 +1,57 @@
+name: Deployed UI Tests
+
+on:
+  push:
+    branches:
+      - main
+      - automation/playwright-ui-tests
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: follow-up-manager-deployed-ui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check test configuration
+        shell: bash
+        env:
+          JIRA_STORAGE_STATE_GZIP_B64: ${{ secrets.JIRA_STORAGE_STATE_GZIP_B64 }}
+        run: |
+          test -n "$JIRA_BASE_URL" || (echo "Missing JIRA_BASE_URL" && exit 1)
+          test -n "$JIRA_STORAGE_STATE_GZIP_B64" || (echo "Missing JIRA_STORAGE_STATE_GZIP_B64" && exit 1)
+      - run: npm install --no-save @playwright/test
+      - run: npx playwright install --with-deps chromium
+      - name: Restore Jira session
+        shell: bash
+        env:
+          JIRA_STORAGE_STATE_GZIP_B64: ${{ secrets.JIRA_STORAGE_STATE_GZIP_B64 }}
+        run: |
+          mkdir -p .auth
+          printf '%s' "$JIRA_STORAGE_STATE_GZIP_B64" | base64 --decode | gzip --decompress > .auth/jira.json
+          test -s .auth/jira.json
+      - run: npx playwright test
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence-${{ github.run_attempt }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
