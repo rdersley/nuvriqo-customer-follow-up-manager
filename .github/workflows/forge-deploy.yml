@@ -70,6 +70,7 @@ jobs:
         run: |
           npm install --global @forge/cli
           forge settings set usage-analytics false
+          forge settings set default-environment development
       - name: Forge lint
         run: forge lint
 
@@ -92,6 +93,7 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
           npm install --global @forge/cli
           forge settings set usage-analytics false
+          forge settings set default-environment development
       - name: Build Custom UI
         run: npm run build:ui
       - name: Deploy Forge app
