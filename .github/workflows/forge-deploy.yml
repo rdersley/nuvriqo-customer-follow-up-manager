@@ -116,8 +116,26 @@ jobs:
         run: npm run build:ui
       - name: Deploy Forge app
         run: forge deploy --environment "$DEPLOY_ENVIRONMENT" --non-interactive --approve MAJOR_VERSION_RULE
-      - name: Upgrade Jira installation
+      - name: Install or upgrade Jira installation
         if: github.event_name == 'push' || inputs.upgrade_installation == true
-        run: forge install --upgrade --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive
+        shell: bash
+        run: |
+          set +e
+          forge install --upgrade --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive 2>&1 | tee forge-install.log
+          install_status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$install_status" -eq 0 ]; then
+            exit 0
+          fi
+
+          if grep -q "Could not find an installation for the provided Atlassian app" forge-install.log; then
+            echo "No existing production installation found; performing first installation."
+            forge install --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive
+            exit 0
+          fi
+
+          echo "Existing installation upgrade failed for an unexpected reason."
+          exit "$install_status"
       - name: Record deployed commit
         run: echo "Deployed commit $GITHUB_SHA to $DEPLOY_ENVIRONMENT on $DEPLOY_SITE"
