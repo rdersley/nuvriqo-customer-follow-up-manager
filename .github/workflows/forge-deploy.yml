@@ -1,0 +1,95 @@
+name: Forge Production Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      site:
+        description: Atlassian site
+        required: true
+        default: nuvriqo.atlassian.net
+      environment:
+        description: Forge environment
+        required: true
+        default: production
+      product:
+        description: Atlassian product
+        required: true
+        default: jira
+      upgrade_installation:
+        description: Upgrade the existing Jira installation after deploy
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      FORGE_EMAIL: ${{ secrets.FORGE_EMAIL }}
+      FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check release branch
+        shell: bash
+        run: |
+          test "$GITHUB_REF_NAME" = "main" || (echo "Production deployment is only allowed from main" && exit 1)
+      - name: Check Forge credentials
+        shell: bash
+        run: |
+          test -n "$FORGE_EMAIL" || (echo "Missing FORGE_EMAIL secret" && exit 1)
+          test -n "$FORGE_API_TOKEN" || (echo "Missing FORGE_API_TOKEN secret" && exit 1)
+      - name: Install root dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Run tests
+        run: npm test
+      - name: Build Custom UI
+        run: npm run build
+      - name: Install Forge CLI
+        shell: bash
+        run: |
+          npm install --global @forge/cli
+          forge settings set usage-analytics false
+          forge settings set default-environment "${{ inputs.environment }}"
+      - name: Forge lint
+        run: forge lint
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      FORGE_EMAIL: ${{ secrets.FORGE_EMAIL }}
+      FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies and Forge CLI
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          npm install --global @forge/cli
+          forge settings set usage-analytics false
+          forge settings set default-environment "${{ inputs.environment }}"
+      - name: Build Custom UI
+        run: npm run build
+      - name: Deploy Forge app
+        run: forge deploy --environment "${{ inputs.environment }}" --non-interactive
+      - name: Upgrade Jira installation
+        if: inputs.upgrade_installation == true
+        run: forge install --upgrade --site "${{ inputs.site }}" --product "${{ inputs.product }}" --environment "${{ inputs.environment }}" --confirm-scopes --non-interactive
+      - name: Record deployed commit
+        run: echo "Deployed commit $GITHUB_SHA to ${{ inputs.environment }} on ${{ inputs.site }}"
