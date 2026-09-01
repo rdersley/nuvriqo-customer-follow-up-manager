@@ -64,7 +64,7 @@ jobs:
       - name: Run tests
         run: npm test
       - name: Build Custom UI
-        run: npm run build
+        run: npm run build:ui
       - name: Install Forge CLI
         shell: bash
         run: |
@@ -95,7 +95,7 @@ jobs:
           forge settings set usage-analytics false
           forge settings set default-environment "$DEPLOY_ENVIRONMENT"
       - name: Build Custom UI
-        run: npm run build
+        run: npm run build:ui
       - name: Deploy Forge app
         run: forge deploy --environment "$DEPLOY_ENVIRONMENT" --non-interactive
       - name: Upgrade Jira installation
