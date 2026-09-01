@@ -20,6 +20,9 @@ on:
         required: true
         type: boolean
         default: true
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -28,8 +31,14 @@ concurrency:
   group: forge-production-deploy
   cancel-in-progress: false
 
+env:
+  DEPLOY_SITE: ${{ github.event_name == 'workflow_dispatch' && inputs.site || 'nuvriqo.atlassian.net' }}
+  DEPLOY_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+  DEPLOY_PRODUCT: ${{ github.event_name == 'workflow_dispatch' && inputs.product || 'jira' }}
+
 jobs:
   validate:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy-production]')
     runs-on: ubuntu-latest
     env:
       FORGE_EMAIL: ${{ secrets.FORGE_EMAIL }}
@@ -61,12 +70,13 @@ jobs:
         run: |
           npm install --global @forge/cli
           forge settings set usage-analytics false
-          forge settings set default-environment "${{ inputs.environment }}"
+          forge settings set default-environment "$DEPLOY_ENVIRONMENT"
       - name: Forge lint
         run: forge lint
 
   deploy:
     needs: validate
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy-production]')
     runs-on: ubuntu-latest
     environment: production
     env:
@@ -83,13 +93,13 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
           npm install --global @forge/cli
           forge settings set usage-analytics false
-          forge settings set default-environment "${{ inputs.environment }}"
+          forge settings set default-environment "$DEPLOY_ENVIRONMENT"
       - name: Build Custom UI
         run: npm run build
       - name: Deploy Forge app
-        run: forge deploy --environment "${{ inputs.environment }}" --non-interactive
+        run: forge deploy --environment "$DEPLOY_ENVIRONMENT" --non-interactive
       - name: Upgrade Jira installation
-        if: inputs.upgrade_installation == true
-        run: forge install --upgrade --site "${{ inputs.site }}" --product "${{ inputs.product }}" --environment "${{ inputs.environment }}" --confirm-scopes --non-interactive
+        if: github.event_name == 'push' || inputs.upgrade_installation == true
+        run: forge install --upgrade --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive
       - name: Record deployed commit
-        run: echo "Deployed commit $GITHUB_SHA to ${{ inputs.environment }} on ${{ inputs.site }}"
+        run: echo "Deployed commit $GITHUB_SHA to $DEPLOY_ENVIRONMENT on $DEPLOY_SITE"
