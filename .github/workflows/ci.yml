@@ -37,6 +37,29 @@ jobs:
       - name: Install admin UI dependencies
         run: npm --prefix static/admin install
 
+      - name: Audit admin runtime dependencies
+        shell: bash
+        run: |
+          set +e
+          npm --prefix static/admin audit --omit=dev --audit-level=moderate 2>&1 | tee audit.log
+          audit_status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$audit_status" -eq 0 ]; then
+            exit 0
+          fi
+
+          if grep -q "GHSA-w5hq-g745-h8pq" audit.log \
+            && grep -q "@forge/bridge" audit.log \
+            && grep -q "5 moderate severity vulnerabilities" audit.log \
+            && ! grep -Eq "[1-9][0-9]* (high|critical) severity" audit.log; then
+            echo "Accepting the currently known uuid advisory inherited through Atlassian @forge/bridge; no high/critical runtime findings are present."
+            exit 0
+          fi
+
+          echo "Runtime dependency audit contains an unexpected vulnerability and remains a release blocker."
+          exit "$audit_status"
+
       - name: Build admin UI
         run: npm --prefix static/admin run build
 
@@ -53,6 +76,29 @@ jobs:
 
       - name: Install issue panel dependencies
         run: npm --prefix static/issue-panel install
+
+      - name: Audit issue panel runtime dependencies
+        shell: bash
+        run: |
+          set +e
+          npm --prefix static/issue-panel audit --omit=dev --audit-level=moderate 2>&1 | tee audit.log
+          audit_status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$audit_status" -eq 0 ]; then
+            exit 0
+          fi
+
+          if grep -q "GHSA-w5hq-g745-h8pq" audit.log \
+            && grep -q "@forge/bridge" audit.log \
+            && grep -q "5 moderate severity vulnerabilities" audit.log \
+            && ! grep -Eq "[1-9][0-9]* (high|critical) severity" audit.log; then
+            echo "Accepting the currently known uuid advisory inherited through Atlassian @forge/bridge; no high/critical runtime findings are present."
+            exit 0
+          fi
+
+          echo "Runtime dependency audit contains an unexpected vulnerability and remains a release blocker."
+          exit "$audit_status"
 
       - name: Build issue panel UI
         run: npm --prefix static/issue-panel run build
