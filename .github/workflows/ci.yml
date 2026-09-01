@@ -37,6 +37,9 @@ jobs:
       - name: Install admin UI dependencies
         run: npm --prefix static/admin install
 
+      - name: Audit admin runtime dependencies
+        run: npm --prefix static/admin audit --omit=dev --audit-level=moderate
+
       - name: Build admin UI
         run: npm --prefix static/admin run build
 
@@ -53,6 +56,9 @@ jobs:
 
       - name: Install issue panel dependencies
         run: npm --prefix static/issue-panel install
+
+      - name: Audit issue panel runtime dependencies
+        run: npm --prefix static/issue-panel audit --omit=dev --audit-level=moderate
 
       - name: Build issue panel UI
         run: npm --prefix static/issue-panel run build
