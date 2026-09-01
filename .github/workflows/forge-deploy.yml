@@ -130,9 +130,24 @@ jobs:
           fi
 
           if grep -q "Could not find an installation for the provided Atlassian app" forge-install.log; then
-            echo "No existing production installation found; performing first installation."
-            forge install --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive
-            exit 0
+            echo "No existing production installation found; attempting first installation."
+            set +e
+            forge install --site "$DEPLOY_SITE" --product "$DEPLOY_PRODUCT" --environment "$DEPLOY_ENVIRONMENT" --confirm-scopes --non-interactive 2>&1 | tee forge-first-install.log
+            first_install_status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "$first_install_status" -eq 0 ]; then
+              exit 0
+            fi
+
+            if [ "$DEPLOY_ENVIRONMENT" = "production" ] \
+              && grep -q "Installing a licensed app is not permitted" forge-first-install.log; then
+              echo "Production deployment is valid. Atlassian blocks first installation of this licensed app until Marketplace approval; recording this as the expected pre-approval state."
+              exit 0
+            fi
+
+            echo "First installation failed for an unexpected reason."
+            exit "$first_install_status"
           fi
 
           echo "Existing installation upgrade failed for an unexpected reason."
