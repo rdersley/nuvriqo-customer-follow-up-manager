@@ -34,7 +34,7 @@ const baseRule = (overrides = {}) => ({
     { afterDays: 1, message: 'Reminder one' },
     { afterDays: 3, message: 'Reminder two', destinationStatusName: 'Pending customer' }
   ],
-  finalAction: { afterDays: 5, destinationStatusName: 'Resolved' },
+  finalAction: { afterDays: 5, destinationStatusName: 'Resolved', message: 'Final customer message' },
   ...overrides
 });
 
@@ -92,11 +92,12 @@ test('validation rejects missing reminders, messages and negative timings', () =
       { afterDays: -1, message: '' },
       { afterDays: 2, message: 'Second' }
     ],
-    finalAction: { afterDays: 1, destinationStatusName: 'Resolved' }
+    finalAction: { afterDays: 1, destinationStatusName: 'Resolved', message: '' }
   }));
   assert.ok(errors.includes('Reminder timing must be zero or greater'));
   assert.ok(errors.includes('Every reminder needs a customer message'));
   assert.ok(errors.includes('Final action must occur after the last reminder'));
+  assert.ok(errors.includes('Final action needs a customer message'));
 });
 
 test('template renderer safely blanks unknown variables and handles missing reporter', () => {

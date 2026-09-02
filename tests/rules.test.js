@@ -18,7 +18,7 @@ function issue(overrides = {}) {
       status: { name: 'Waiting for customer' },
       reporter: { displayName: 'Jane Customer' },
       summary: 'Replacement device',
-      customfield_10001: { value: 'RYR - Ryanair' },
+      customfield_10001: { value: 'Example Customer' },
       customfield_10002: { value: 'Hardware' },
       ...overrides
     }
@@ -28,21 +28,21 @@ function issue(overrides = {}) {
 function rule(overrides = {}) {
   return {
     id: 'rule-1',
-    name: 'Ryanair hardware',
+    name: 'Hardware follow-up',
     enabled: true,
     priority: 10,
     projectKey: 'DEMO',
     waitingStatusName: 'Waiting for customer',
     timingUnit: 'days',
     conditions: [
-      { fieldId: 'customfield_10001', operator: 'equals', value: 'RYR - Ryanair' },
+      { fieldId: 'customfield_10001', operator: 'equals', value: 'Example Customer' },
       { fieldId: 'customfield_10002', operator: 'equals', value: 'Hardware' }
     ],
     reminders: [
       { afterDays: 2, message: 'First reminder' },
       { afterDays: 4, message: 'Second reminder', destinationStatusName: 'Pending customer' }
     ],
-    finalAction: { afterDays: 7, destinationStatusName: 'Resolved' },
+    finalAction: { afterDays: 7, destinationStatusName: 'Resolved', message: 'Final customer message' },
     ...overrides
   };
 }
@@ -87,11 +87,12 @@ test('rule validation catches invalid reminder ordering and final timing', () =>
       { afterDays: 4, message: 'One' },
       { afterDays: 2, message: 'Two' }
     ],
-    finalAction: { afterDays: 2, destinationStatusName: '' }
+    finalAction: { afterDays: 2, destinationStatusName: '', message: '' }
   }));
   assert.ok(errors.some((value) => value.includes('increase')));
   assert.ok(errors.some((value) => value.includes('after the last reminder')));
   assert.ok(errors.some((value) => value.includes('Destination status')));
+  assert.ok(errors.some((value) => value.includes('customer message')));
 });
 
 test('template rendering supplies customer and issue variables', () => {

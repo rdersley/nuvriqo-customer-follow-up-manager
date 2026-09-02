@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@forge/bridge';
 import './styles.css';
 
+const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
+
 const blankCondition = () => ({ fieldId: '', operator: 'equals', value: '' });
 const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '' });
 const blankReminder = (afterDays = 2) => ({
@@ -27,6 +29,7 @@ const emptyRule = (projectKey = '') => ({
     afterDays: 7,
     destinationStatusName: '',
     resolutionId: '',
+    message: DEFAULT_FINAL_MESSAGE,
     fields: {},
     fieldEntries: []
   }
@@ -53,7 +56,7 @@ function normaliseRule(rule) {
     participantAccountIds: reminder.participantAccountIds ?? [],
     participants: reminder.participants ?? []
   }));
-  next.finalAction = { resolutionId: '', fields: {}, ...(next.finalAction ?? {}) };
+  next.finalAction = { resolutionId: '', message: DEFAULT_FINAL_MESSAGE, fields: {}, ...(next.finalAction ?? {}) };
   next.finalAction.fieldEntries = Object.entries(next.finalAction.fields ?? {})
     .filter(([fieldId]) => fieldId !== 'resolution')
     .map(([fieldId, value]) => valueToEntry(fieldId, value));
@@ -130,6 +133,101 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
       <span className="hint-inline">{loading ? 'Reading values from Jira…' : options.length ? `${options.length} values loaded from Jira.` : 'No fixed values were returned. You can still enter the Jira value manually.'}</span>
     </label>
     {canRemove && <button className="icon-danger condition-remove" onClick={() => onRemove(index)} title="Remove filter">×</button>}
+  </div>;
+}
+
+function transitionOptionValue(field, option) {
+  const isSelect = field?.schemaType === 'option' || String(field?.schemaCustom ?? '').toLowerCase().includes('select');
+  if (isSelect) return { format: 'json', value: JSON.stringify({ value: option.value }) };
+  return { format: 'text', value: String(option.value ?? '') };
+}
+
+function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const field = fields.find((item) => item.id === entry.fieldId);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (!field?.id) {
+        setOptions([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const result = await invoke('getFieldOptions', { fieldId: field.id, fieldName: field.name });
+        if (!cancelled) setOptions(result?.values ?? []);
+      } catch {
+        if (!cancelled) setOptions([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [field?.id]);
+
+  function selectField(fieldId) {
+    onUpdate(index, 'fieldId', fieldId);
+    onUpdate(index, 'value', '');
+    onUpdate(index, 'format', 'text');
+  }
+
+  function selectOption(rawValue) {
+    const option = options.find((item) => String(item.value) === rawValue);
+    if (!option) {
+      onUpdate(index, 'value', '');
+      return;
+    }
+    const encoded = transitionOptionValue(field, option);
+    onUpdate(index, 'format', encoded.format);
+    onUpdate(index, 'value', encoded.value);
+  }
+
+  const selectedOption = options.find((option) => {
+    if (entry.format === 'json') {
+      try {
+        const parsed = JSON.parse(entry.value ?? '{}');
+        return String(parsed?.value ?? parsed?.id ?? '') === String(option.value);
+      } catch {
+        return false;
+      }
+    }
+    return String(option.value) === String(entry.value ?? '');
+  });
+
+  return <div className="condition-row">
+    <label>Jira field
+      <select value={entry.fieldId} onChange={(e) => selectField(e.target.value)}>
+        <option value="">Choose field…</option>
+        {fields.filter((item) => item.id !== 'resolution').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+    </label>
+    <label>Value type
+      <select value={entry.format ?? 'text'} onChange={(e) => onUpdate(index, 'format', e.target.value)}>
+        <option value="text">Text</option>
+        <option value="number">Number</option>
+        <option value="boolean">Boolean</option>
+        <option value="json">JSON / Jira object</option>
+      </select>
+    </label>
+    <label>Value
+      {entry.format === 'boolean' ?
+        <select value={entry.value ?? 'true'} onChange={(e) => onUpdate(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
+        loading ? <div className="loading-field">Loading Jira values…</div> :
+          options.length ? <>
+            <select value={selectedOption?.value ?? ''} onChange={(e) => selectOption(e.target.value)}>
+              <option value="">Choose value…</option>
+              {options.map((item) => <option key={`${item.value}-${item.displayName}`} value={item.value}>{item.displayName}</option>)}
+            </select>
+            <span className="hint-inline">{options.length} values loaded from Jira.</span>
+          </> : <>
+            <input value={entry.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)} placeholder={entry.format === 'json' ? '{"id":"10000"}' : 'Transition value'} />
+            <span className="hint-inline">No fixed values were returned. Enter the Jira transition value manually.</span>
+          </>}
+    </label>
+    <button className="icon-danger condition-remove" type="button" onClick={() => onRemove(index)} title="Remove transition field">×</button>
   </div>;
 }
 
@@ -354,7 +452,7 @@ function App() {
       <div className="section-head"><h2>{setup.rules.some((rule) => rule.id === editing.id) ? 'Edit rule' : 'New rule'}</h2><label className="toggle"><input type="checkbox" checked={editing.enabled} onChange={(e) => update(['enabled'], e.target.checked)} /> Enabled</label></div>
 
       <div className="grid two">
-        <label>Rule name<input value={editing.name} onChange={(e) => update(['name'], e.target.value)} placeholder="Ryanair hardware follow-up" /></label>
+        <label>Rule name<input value={editing.name} onChange={(e) => update(['name'], e.target.value)} placeholder="Hardware follow-up" /></label>
         <label>Priority<input type="number" value={editing.priority ?? 100} onChange={(e) => update(['priority'], Number(e.target.value))} /></label>
       </div>
 
@@ -365,7 +463,7 @@ function App() {
       </div>
 
       <div className="section-head"><h3>Rule filters</h3><button onClick={addCondition}>+ Add filter</button></div>
-      <p className="hint">All filters must match. Example: <strong>Client = Ryanair</strong> AND <strong>Ticket Type = Hardware</strong>.</p>
+      <p className="hint">All filters must match. Example: <strong>Client = Example Customer</strong> AND <strong>Ticket Type = Hardware</strong>.</p>
       <div className="conditions">{editing.conditions.map((condition, index) => <ConditionRow key={index} condition={condition} index={index} fields={fieldOptions} onUpdate={updateCondition} onRemove={removeCondition} canRemove={editing.conditions.length > 1} />)}</div>
 
       <div className="section-head"><h3>Customer reminders</h3><button onClick={addReminder}>+ Add reminder</button></div>
@@ -391,36 +489,17 @@ function App() {
         <label>Auto-transition after {unitLabel}<input type="number" min="0" value={editing.finalAction.afterDays} onChange={(e) => update(['finalAction', 'afterDays'], Number(e.target.value))} /></label>
         <label>Destination status<select value={editing.finalAction.destinationStatusName} onChange={(e) => update(['finalAction', 'destinationStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
       </div>
+      <label>Final public customer message<textarea rows="3" value={editing.finalAction.message ?? ''} onChange={(e) => update(['finalAction', 'message'], e.target.value)} /></label>
+      <p className="hint">This message is sent to the customer immediately before the final workflow transition. The same template variables shown above can be used here.</p>
       <div className="grid two">
         <label>Resolution<select value={editing.finalAction.resolutionId ?? ''} onChange={(e) => update(['finalAction', 'resolutionId'], e.target.value)}><option value="">Do not set Resolution</option>{resolutions.map((resolution) => <option key={resolution.id} value={resolution.id}>{resolution.name}</option>)}</select></label>
         <div className="hint-box">Use this when the destination workflow transition requires Jira's <strong>Resolution</strong> field. Nuvriqo sends it as part of the transition.</div>
       </div>
 
       <div className="section-head"><h3>Advanced transition fields</h3><button type="button" onClick={addTransitionField}>+ Add field</button></div>
-      <p className="hint">Optional. Use this only when the final Jira workflow transition requires fields in addition to Resolution. For select/user/custom fields, JSON can be used to send Jira's expected object shape (for example <code>{'{"id":"10000"}'}</code>).</p>
+      <p className="hint">Optional. Use this only when the final Jira workflow transition requires fields in addition to Resolution. Where Jira provides fixed values, Nuvriqo loads them automatically.</p>
       {(editing.finalAction.fieldEntries ?? []).length === 0 ? <div className="empty">No additional transition fields configured.</div> :
-        <div className="conditions">{(editing.finalAction.fieldEntries ?? []).map((entry, index) => <div className="condition-row" key={index}>
-          <label>Jira field
-            <select value={entry.fieldId} onChange={(e) => updateTransitionField(index, 'fieldId', e.target.value)}>
-              <option value="">Choose field…</option>
-              {fieldOptions.filter((field) => field.id !== 'resolution').map((field) => <option key={field.id} value={field.id}>{field.name}</option>)}
-            </select>
-          </label>
-          <label>Value type
-            <select value={entry.format ?? 'text'} onChange={(e) => updateTransitionField(index, 'format', e.target.value)}>
-              <option value="text">Text</option>
-              <option value="number">Number</option>
-              <option value="boolean">Boolean</option>
-              <option value="json">JSON / Jira object</option>
-            </select>
-          </label>
-          <label>Value
-            {entry.format === 'boolean' ?
-              <select value={entry.value ?? 'true'} onChange={(e) => updateTransitionField(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
-              <input value={entry.value ?? ''} onChange={(e) => updateTransitionField(index, 'value', e.target.value)} placeholder={entry.format === 'json' ? '{"id":"10000"}' : 'Transition value'} />}
-          </label>
-          <button className="icon-danger condition-remove" type="button" onClick={() => removeTransitionField(index)} title="Remove transition field">×</button>
-        </div>)}</div>}
+        <div className="conditions">{(editing.finalAction.fieldEntries ?? []).map((entry, index) => <TransitionFieldRow key={index} entry={entry} index={index} fields={fieldOptions} onUpdate={updateTransitionField} onRemove={removeTransitionField} />)}</div>}
 
       <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and validates required workflow fields before transitioning.</p>
 

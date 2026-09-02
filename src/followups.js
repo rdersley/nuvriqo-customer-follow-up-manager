@@ -51,7 +51,8 @@ export async function reconcileIssue(issue, rules) {
     pausedAt: null,
     startedAt: new Date().toISOString(),
     completedReminderIndexes: [],
-    reminderProgress: {}
+    reminderProgress: {},
+    finalActionProgress: {}
   };
   await saveCycle(cycle);
   await appendAudit(issue.id, 'cycle-started', {
@@ -163,6 +164,26 @@ export async function processCycle(cycle, rule, now = new Date()) {
   }
 
   if (waitingAmount >= Number(rule.finalAction.afterDays)) {
+    cycle.finalActionProgress ??= {};
+    const finalProgress = cycle.finalActionProgress;
+    const finalMessage = String(rule?.finalAction?.message ?? '').trim();
+
+    if (finalMessage && !finalProgress.commentSent) {
+      const context = buildTemplateContext(issue, cycle, {
+        daysWaiting,
+        waitingAmount,
+        waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
+      });
+      await addPublicCustomerComment(cycle.issueKey, renderTemplate(finalMessage, context));
+      finalProgress.commentSent = true;
+      cycle.finalActionProgress = finalProgress;
+      await saveCycle(cycle);
+      await appendAudit(cycle.issueId, 'final-comment-sent', {
+        issueKey: cycle.issueKey,
+        ruleId: rule.id
+      });
+    }
+
     const transitionFields = {};
     if (rule.finalAction.resolutionId) {
       transitionFields.resolution = { id: rule.finalAction.resolutionId };
