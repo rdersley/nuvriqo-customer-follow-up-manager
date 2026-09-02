@@ -96,5 +96,8 @@ export function validateRule(rule) {
   if (!rule?.finalAction?.destinationStatusName) {
     errors.push('Destination status is required');
   }
+  if (!String(rule?.finalAction?.message ?? '').trim()) {
+    errors.push('Final action needs a customer message');
+  }
   return [...new Set(errors)];
 }
