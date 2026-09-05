@@ -1,21 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@forge/bridge';
 
-const EVENT_LABELS = {
-  'cycle-started': 'Follow-up started',
-  'cycle-cancelled': 'Follow-up cancelled',
-  'cycle-paused': 'Follow-up paused',
-  'cycle-resumed': 'Follow-up resumed',
-  'cycle-restarted': 'Follow-up restarted',
-  'participants-added': 'Participants added',
-  'reminder-comment-sent': 'Reminder sent',
-  'reminder-transitioned': 'Reminder status changed',
-  'reminder-completed': 'Reminder completed',
-  'final-comment-sent': 'Final customer message sent',
-  'auto-transitioned': 'Auto-close completed',
-  'processing-error': 'Processing failed'
-};
-
 function formatDate(value) {
   if (!value) return 'Not recorded yet';
   const date = new Date(value);
@@ -23,13 +8,48 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
-function eventDetail(item) {
-  if (item.type === 'processing-error') return item.message || 'The follow-up could not be processed.';
-  if (item.reason) return item.reason;
-  if (item.type === 'reminder-comment-sent' || item.type === 'reminder-completed') return `Reminder ${(Number(item.reminderIndex) || 0) + 1}`;
-  if (item.destinationStatusName) return `Moved to ${item.destinationStatusName}`;
-  if (item.participantCount) return `${item.participantCount} participant${item.participantCount === 1 ? '' : 's'}`;
-  return '';
+function rowForActivity(item) {
+  if (item.type === 'rule-check') {
+    return {
+      ...item,
+      filters: item.filtersMatched ? 'Matched' : 'Not matched',
+      actionText: item.action || 'None',
+      tone: item.filtersMatched ? 'matched' : 'neutral'
+    };
+  }
+  if (item.type === 'reminder-completed') {
+    return {
+      ...item,
+      filters: 'Matched (active follow-up)',
+      actionText: `Reminder ${(Number(item.reminderIndex) || 0) + 1} sent${item.destinationStatusName ? ` → ${item.destinationStatusName}` : ''}`,
+      tone: 'action'
+    };
+  }
+  if (item.type === 'auto-transitioned') {
+    return {
+      ...item,
+      filters: 'Matched (active follow-up)',
+      actionText: `Closed → ${item.destinationStatusName || 'final status'}`,
+      tone: 'action'
+    };
+  }
+  if (item.type === 'cycle-cancelled') {
+    return {
+      ...item,
+      filters: item.filtersMatched === false ? 'Not matched' : 'No longer active',
+      actionText: `Follow-up cancelled${item.reason ? ` — ${item.reason}` : ''}`,
+      tone: 'neutral'
+    };
+  }
+  if (item.type === 'processing-error') {
+    return {
+      ...item,
+      filters: '—',
+      actionText: item.message || 'Processing failed',
+      tone: 'error'
+    };
+  }
+  return null;
 }
 
 export default function ActivityPanel() {
@@ -53,10 +73,10 @@ export default function ActivityPanel() {
   useEffect(() => { load(); }, []);
 
   const activity = useMemo(() => {
-    const rows = data?.activity ?? [];
+    const rows = (data?.activity ?? []).map(rowForActivity).filter(Boolean);
+    if (filter === 'checks') return rows.filter((item) => item.type === 'rule-check');
+    if (filter === 'actions') return rows.filter((item) => ['reminder-completed', 'auto-transitioned', 'cycle-cancelled'].includes(item.type) || (item.type === 'rule-check' && item.action && item.action !== 'None' && !item.action.startsWith('None -')));
     if (filter === 'errors') return rows.filter((item) => item.type === 'processing-error');
-    if (filter === 'reminders') return rows.filter((item) => item.type.includes('reminder'));
-    if (filter === 'closures') return rows.filter((item) => item.type === 'auto-transitioned' || item.type === 'final-comment-sent');
     return rows;
   }, [data, filter]);
 
@@ -88,22 +108,21 @@ export default function ActivityPanel() {
 
     <section className="card">
       <div className="section-head">
-        <div><h2>Run history</h2><p className="muted">Latest follow-up activity for this Jira project. Audit records are retained for 180 days.</p></div>
+        <div><h2>Run history</h2><p className="muted">Shows when a ticket was checked, whether it matched the rule filters, and what action the app took.</p></div>
         <button onClick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
       </div>
       <div className="activity-filters">
-        {['all', 'reminders', 'closures', 'errors'].map((value) => <button key={value} className={filter === value ? 'filter-active' : ''} onClick={() => setFilter(value)}>{value === 'all' ? 'All activity' : value[0].toUpperCase() + value.slice(1)}</button>)}
+        {['all', 'checks', 'actions', 'errors'].map((value) => <button key={value} className={filter === value ? 'filter-active' : ''} onClick={() => setFilter(value)}>{value === 'all' ? 'All activity' : value[0].toUpperCase() + value.slice(1)}</button>)}
       </div>
       {error && <div className="notice">{error}</div>}
       {activity.length === 0 ? <div className="empty">No matching activity has been recorded yet.</div> :
-        <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Event</th><th>Details</th><th>Result</th></tr></thead><tbody>
+        <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Filters</th><th>Action</th></tr></thead><tbody>
           {activity.map((item, index) => <tr key={`${item.timestamp}-${item.issueId}-${item.type}-${index}`}>
             <td>{formatDate(item.timestamp)}</td>
             <td><strong>{item.issueKey || item.issueId}</strong></td>
             <td>{item.ruleName || item.ruleId || '—'}</td>
-            <td>{EVENT_LABELS[item.type] || item.type}</td>
-            <td>{eventDetail(item) || '—'}</td>
-            <td><span className={`result-pill ${item.type === 'processing-error' ? 'result-error' : 'result-success'}`}>{item.type === 'processing-error' ? 'Failed' : 'Success'}</span></td>
+            <td><span className={`result-pill ${item.filters === 'Matched' || item.filters?.startsWith('Matched (') ? 'result-success' : ''}`}>{item.filters}</span></td>
+            <td>{item.tone === 'error' ? <span className="result-pill result-error">{item.actionText}</span> : item.actionText}</td>
           </tr>)}
         </tbody></table></div>}
     </section>
