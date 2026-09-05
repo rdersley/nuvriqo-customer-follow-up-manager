@@ -5,19 +5,28 @@ Forge app for Jira Service Management that manages configurable customer follow-
 ## V1 capabilities
 
 - Multiple follow-up rules per project.
-- Rule matching by a configurable Jira field/value, such as `Ticket Type = Hardware`.
+- Rule matching with multiple Jira field conditions.
+- Multi-value comparisons including **Is any of** and **Is none of**.
 - Any number of reminder steps per rule.
 - Public JSM reminder comments with message templates.
-- Configurable waiting status and final destination status.
+- Optional request participant additions before reminders.
+- Configurable waiting status and reminder destination statuses.
+- Active follow-up cycles remain valid in configured reminder destination statuses, so later stages continue from the original cycle start time.
+- Final customer-facing message before the closing transition.
 - Final transition by **destination status name** rather than hard-coded transition IDs.
+- Optional resolution and additional transition-field values for final actions.
 - Stop/reconcile the sequence when the ticket no longer matches its rule.
+- Customer replies cancel the active follow-up cycle.
 - Restart a fresh cycle when the ticket becomes eligible again.
 - Agent issue panel with pause, resume, restart and cancel controls.
 - Paused time is excluded from reminder/auto-close timing.
-- Per-ticket audit history.
+- Project-level Run History with ticket check, filter match, action evidence and failures.
+- Audit evidence for customer comments, participant additions, reminder status changes, final comments, final status transitions and resolutions.
+- Click-through ticket keys for direct Jira verification.
+- Scheduler heartbeat and current active-follow-up visibility.
 - Forge KVS storage for rules, active cycles and audit records.
-- Hourly scheduled processor.
-- Project settings UI that discovers the project's Jira fields and statuses.
+- Project settings UI that discovers Jira fields, fixed option values and statuses.
+- Paid-app licensing support for Marketplace distribution.
 
 ## Project settings
 
@@ -26,13 +35,14 @@ After installation, open the JSM project's **Project settings** and select **Nuv
 A rule defines:
 
 1. Rule name and priority.
-2. The Jira status that starts/maintains the waiting period.
-3. An optional Jira field/value condition, e.g. `Ticket Type = Hardware`.
-4. As many reminder steps as required, each with its own day and public message.
-5. The day on which the final action occurs.
-6. The destination Jira status.
+2. The Jira status that starts the waiting period.
+3. One or more Jira field conditions.
+4. As many reminder steps as required, each with its own timing, public message and optional destination status/participants.
+5. The timing for the final action.
+6. The final customer message.
+7. The destination Jira status, optional resolution and any required transition fields.
 
-This allows a Hardware rule to have, for example, four reminders while a General Support rule has only two.
+This allows different request types, customers or processes to use different reminder sequences without maintaining large Jira Automation rule sets.
 
 ## First-time Forge registration and deployment
 
@@ -55,27 +65,37 @@ For later deployments, the root `npm run deploy` command builds both Custom UI a
 
 ```json
 {
-  "id": "hardware",
-  "name": "Hardware follow-up",
+  "id": "customer-follow-up",
+  "name": "Customer 7/14 follow-up",
   "enabled": true,
   "projectKey": "SD",
   "waitingStatusName": "Awaiting Customer Feedback",
-  "condition": {
-    "fieldId": "customfield_12345",
-    "operator": "equals",
-    "value": "Hardware"
-  },
+  "conditions": [
+    {
+      "fieldId": "customfield_12345",
+      "operator": "isAnyOf",
+      "value": ["Customer A", "Customer B"]
+    },
+    {
+      "fieldId": "customfield_67890",
+      "operator": "isAnyOf",
+      "value": ["Category A", "Category B"]
+    }
+  ],
   "reminders": [
-    { "afterDays": 2, "message": "Reminder 1" },
-    { "afterDays": 4, "message": "Reminder 2" },
-    { "afterDays": 7, "message": "Reminder 3" },
-    { "afterDays": 10, "message": "Final reminder" }
+    {
+      "afterDays": 7,
+      "message": "We are still waiting for your response.",
+      "destinationStatusName": "Inactive Follow up Sent"
+    }
   ],
   "finalAction": {
     "afterDays": 14,
-    "destinationStatusName": "Resolved"
+    "message": "This request is now being closed because we have not received a response.",
+    "destinationStatusName": "Resolved",
+    "resolutionName": "No Action Required"
   }
 }
 ```
 
-At runtime, the scheduled processor reads the transitions currently available on the issue and uses the transition whose destination status matches `destinationStatusName`.
+At runtime, the processor reads the transitions currently available on the issue and uses the transition whose destination status matches the configured destination status.
