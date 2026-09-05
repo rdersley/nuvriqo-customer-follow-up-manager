@@ -34,6 +34,8 @@ export async function reconcileIssue(issue, rules) {
       await deleteCycle(issue.id);
       await appendAudit(issue.id, 'cycle-cancelled', {
         issueKey: issue.key,
+        ruleId: existing.ruleId,
+        ruleName: existingRule?.name,
         reason: 'Issue no longer matches an enabled follow-up rule'
       });
     }
@@ -67,7 +69,11 @@ export async function cancelForCustomerReply(issueId, issueKey) {
   const cycle = await getCycle(issueId);
   if (!cycle?.active) return false;
   await deleteCycle(issueId);
-  await appendAudit(issueId, 'cycle-cancelled', { issueKey, reason: 'Customer replied' });
+  await appendAudit(issueId, 'cycle-cancelled', {
+    issueKey,
+    ruleId: cycle.ruleId,
+    reason: 'Customer replied'
+  });
   return true;
 }
 
@@ -83,6 +89,7 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
     await appendAudit(cycle.issueId, 'participants-added', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
+      ruleName: rule.name,
       reminderIndex: index,
       participantCount: reminder.participantAccountIds.length
     });
@@ -99,6 +106,7 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
     await appendAudit(cycle.issueId, 'reminder-comment-sent', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
+      ruleName: rule.name,
       reminderIndex: index
     });
   }
@@ -111,6 +119,7 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
     await appendAudit(cycle.issueId, 'reminder-transitioned', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
+      ruleName: rule.name,
       reminderIndex: index,
       destinationStatusName: reminder.destinationStatusName,
       transitionId: transition.id
@@ -131,6 +140,8 @@ export async function processCycle(cycle, rule, now = new Date()) {
     await deleteCycle(cycle.issueId);
     await appendAudit(cycle.issueId, 'cycle-cancelled', {
       issueKey: cycle.issueKey,
+      ruleId: rule.id,
+      ruleName: rule.name,
       reason: 'Issue no longer matches rule or configured reminder statuses'
     });
     return { action: 'cancelled' };
@@ -155,6 +166,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
       await appendAudit(cycle.issueId, 'reminder-completed', {
         issueKey: cycle.issueKey,
         ruleId: rule.id,
+        ruleName: rule.name,
         reminderIndex: index,
         after: reminder.afterDays,
         timingUnit: rule?.timingUnit ?? 'days'
@@ -180,7 +192,8 @@ export async function processCycle(cycle, rule, now = new Date()) {
       await saveCycle(cycle);
       await appendAudit(cycle.issueId, 'final-comment-sent', {
         issueKey: cycle.issueKey,
-        ruleId: rule.id
+        ruleId: rule.id,
+        ruleName: rule.name
       });
     }
 
@@ -201,6 +214,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
     await appendAudit(cycle.issueId, 'auto-transitioned', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
+      ruleName: rule.name,
       destinationStatusName: rule.finalAction.destinationStatusName,
       transitionId: transition.id,
       resolutionId: rule.finalAction.resolutionId ?? null,
