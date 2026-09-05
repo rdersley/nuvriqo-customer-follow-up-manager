@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@forge/bridge';
+import ActivityPanel from './ActivityPanel.jsx';
 import './styles.css';
 
 const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
@@ -343,6 +344,7 @@ function App() {
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [view, setView] = useState('rules');
 
   async function load() {
     setBusy(true);
@@ -479,12 +481,19 @@ function App() {
   return <main className="page">
     <div className="header">
       <div><p className="eyebrow">Nuvriqo</p><h1>Customer Follow-Up Manager</h1><p>Configure follow-up and auto-close policies for <strong>{setup.projectKey}</strong>.</p></div>
-      {!editing && <button className="primary" onClick={() => setEditing(emptyRule(setup.projectKey))}>Create rule</button>}
+      {!editing && view === 'rules' && <button className="primary" onClick={() => setEditing(emptyRule(setup.projectKey))}>Create rule</button>}
     </div>
+
+    {!editing && <div className="top-tabs">
+      <button className={view === 'rules' ? 'tab-active' : ''} onClick={() => setView('rules')}>Rules</button>
+      <button className={view === 'activity' ? 'tab-active' : ''} onClick={() => setView('activity')}>Run history</button>
+    </div>}
 
     {message && <div className="notice">{message}</div>}
 
-    {!editing && <section className="card">
+    {!editing && view === 'activity' && <ActivityPanel />}
+
+    {!editing && view === 'rules' && <section className="card">
       <h2>Follow-up rules</h2>
       {setup.rules.length === 0 ? <div className="empty">No rules yet. Create your first customer follow-up policy.</div> :
         <div className="rules">{setup.rules.map((rule) => {
