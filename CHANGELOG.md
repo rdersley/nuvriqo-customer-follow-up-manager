@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1 — UI refresh — 5 September 2026
+
+### Changed
+
+- Applied Nuvriqo UI System v1 styling to the Customer Follow-Up Manager admin experience.
+- Preserved the newer Activity Panel, follow-up processing, storage and resolver changes already present on `main`.
+- Refined cards, forms, reminder stages, buttons, status presentation, responsive behaviour and accessibility focus states.
+
 ## 0.9.0 — Release candidate — 20 August 2026
 
 ### Added
