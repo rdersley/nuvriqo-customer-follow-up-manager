@@ -41,6 +41,13 @@ modules:
       function: privacy-handler
       interval: week
 
+  webtrigger:
+    - key: nuvriqo-oneoff-cleanup
+      function: cleanup-handler
+      urlFormat: v2
+      response:
+        type: dynamic
+
   function:
     - key: issue-handler
       handler: index.onIssueUpdated
@@ -52,6 +59,8 @@ modules:
       handler: privacy.processPrivacy
     - key: ui-resolver
       handler: ui-resolver.handler
+    - key: cleanup-handler
+      handler: migration-cleanup.runCleanup
 
 resources:
   - key: admin-ui
