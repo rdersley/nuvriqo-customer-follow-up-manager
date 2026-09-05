@@ -4,6 +4,8 @@ const RULE_PREFIX = 'rule:';
 const CYCLE_PREFIX = 'cycle:';
 const AUDIT_PREFIX = 'audit:';
 const ACCOUNT_PREFIX = 'account:';
+const SYSTEM_PREFIX = 'system:';
+const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const AUDIT_RETENTION_DAYS = 180;
 
 async function queryByPrefix(prefix) {
@@ -52,8 +54,6 @@ function normaliseStoredRule(rule) {
       destinationStatusName: reminder?.destinationStatusName ?? '',
       participantAccountIds: [...new Set(reminder?.participantAccountIds ?? [])]
     };
-    // Display names are resolved from Jira when the settings UI loads; storing
-    // them would create avoidable personal-data refresh obligations.
     delete clean.participants;
     return clean;
   });
@@ -162,6 +162,26 @@ export async function getAudit(issueId) {
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
+export async function getRecentAudit(limit = 250) {
+  const results = await queryByPrefix(AUDIT_PREFIX);
+  return results
+    .map((item) => item.value)
+    .filter((item) => item?.timestamp)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, Math.max(1, Math.min(Number(limit) || 250, 1000)));
+}
+
+export async function saveSchedulerStatus(status) {
+  await kvs.set(SCHEDULER_STATUS_KEY, {
+    ...status,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function getSchedulerStatus() {
+  return kvs.get(SCHEDULER_STATUS_KEY);
+}
+
 export async function getPersonalDataAccounts() {
   const results = await queryByPrefix(ACCOUNT_PREFIX);
   return results.map((item) => item.value).filter((value) => value?.accountId);
@@ -185,7 +205,6 @@ export async function erasePersonalDataForAccount(accountId) {
     });
 
     if (changed) {
-      // Write directly to avoid recreating the privacy reference being erased.
       await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule({ ...rule, reminders }));
     }
   }
