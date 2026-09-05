@@ -6,7 +6,8 @@ import {
   getActiveCycles,
   getCycle,
   getRules,
-  saveCycle
+  saveCycle,
+  saveSchedulerStatus
 } from './storage.js';
 
 function eventIssueKey(event) {
@@ -17,9 +18,6 @@ function invocationContext(event, context) {
   return context ?? event?.context ?? null;
 }
 
-// Forge does not provide a license object for normal development/staging installs
-// unless a license state is being simulated. In production, an explicit inactive
-// license disables processing while leaving read-only visibility available.
 function licenseAllows(context) {
   return context?.license == null || context.license.active === true;
 }
@@ -66,47 +64,67 @@ export async function onCommentCreated(event, context) {
 export async function processDueFollowUps(event, context) {
   if (!licenseAllows(invocationContext(event, context))) return;
 
+  const startedAt = new Date().toISOString();
   const [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
   const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
+  let processed = 0;
+  let actions = 0;
+  let failures = 0;
 
-  for (const cycle of cycles) {
-    const rule = rulesById.get(cycle.ruleId);
+  try {
+    for (const cycle of cycles) {
+      const rule = rulesById.get(cycle.ruleId);
 
-    if (!rule?.enabled) {
-      await deleteCycle(cycle.issueId).catch(() => undefined);
-      await appendAudit(cycle.issueId, 'cycle-cancelled', {
-        issueKey: cycle.issueKey,
-        ruleId: cycle.ruleId,
-        reason: rule ? 'Follow-up rule was disabled' : 'Follow-up rule was deleted'
-      }).catch(() => undefined);
-      continue;
-    }
-
-    try {
-      await processCycle(cycle, rule);
-      const latest = await getCycle(cycle.issueId);
-      if (latest?.lastError) {
-        delete latest.lastError;
-        await saveCycle(latest);
-      }
-    } catch (error) {
-      const message = error?.message || String(error);
-      console.error(`Failed processing ${cycle.issueKey}:`, error);
-
-      const latest = await getCycle(cycle.issueId).catch(() => cycle);
-      if (latest) {
-        latest.lastError = {
-          message,
-          occurredAt: new Date().toISOString()
-        };
-        await saveCycle(latest).catch(() => undefined);
+      if (!rule?.enabled) {
+        await deleteCycle(cycle.issueId).catch(() => undefined);
+        await appendAudit(cycle.issueId, 'cycle-cancelled', {
+          issueKey: cycle.issueKey,
+          ruleId: cycle.ruleId,
+          reason: rule ? 'Follow-up rule was disabled' : 'Follow-up rule was deleted'
+        }).catch(() => undefined);
+        actions += 1;
+        continue;
       }
 
-      await appendAudit(cycle.issueId, 'processing-error', {
-        issueKey: cycle.issueKey,
-        ruleId: cycle.ruleId,
-        message
-      }).catch(() => undefined);
+      processed += 1;
+      try {
+        const result = await processCycle(cycle, rule);
+        if (result?.action && result.action !== 'none' && result.action !== 'paused') actions += 1;
+        const latest = await getCycle(cycle.issueId);
+        if (latest?.lastError) {
+          delete latest.lastError;
+          await saveCycle(latest);
+        }
+      } catch (error) {
+        failures += 1;
+        const message = error?.message || String(error);
+        console.error(`Failed processing ${cycle.issueKey}:`, error);
+
+        const latest = await getCycle(cycle.issueId).catch(() => cycle);
+        if (latest) {
+          latest.lastError = {
+            message,
+            occurredAt: new Date().toISOString()
+          };
+          await saveCycle(latest).catch(() => undefined);
+        }
+
+        await appendAudit(cycle.issueId, 'processing-error', {
+          issueKey: cycle.issueKey,
+          ruleId: cycle.ruleId,
+          message
+        }).catch(() => undefined);
+      }
     }
+  } finally {
+    await saveSchedulerStatus({
+      startedAt,
+      completedAt: new Date().toISOString(),
+      activeCyclesSeen: cycles.length,
+      processed,
+      actions,
+      failures,
+      status: failures > 0 ? 'completed-with-errors' : 'success'
+    }).catch(() => undefined);
   }
 }
