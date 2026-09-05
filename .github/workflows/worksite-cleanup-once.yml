@@ -1,0 +1,103 @@
+name: One-off Follow-Up Migration Cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/worksite-cleanup-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    environment: nuvriqo-sandbox
+    env:
+      FORGE_EMAIL: ${{ secrets.FORGE_EMAIL }}
+      FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
+    steps:
+      - name: Checkout temporary cleanup branch
+        uses: actions/checkout@v4
+        with:
+          ref: migration/cleanup-followup-20260905
+          clean: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check Forge credentials
+        shell: bash
+        run: |
+          test -n "$FORGE_EMAIL" || (echo "Missing FORGE_EMAIL secret" && exit 1)
+          test -n "$FORGE_API_TOKEN" || (echo "Missing FORGE_API_TOKEN secret" && exit 1)
+
+      - name: Install dependencies and Forge CLI
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+          npm install --global @forge/cli
+          forge settings set usage-analytics false
+          forge settings set default-environment development
+
+      - name: Test temporary cleanup build
+        run: npm test
+
+      - name: Build Custom UI resources
+        run: npm run build:ui
+
+      - name: Deploy temporary cleanup code to development
+        run: forge deploy --environment development --non-interactive --approve MAJOR_VERSION_RULE
+
+      - name: Upgrade worksite installation for temporary cleanup module
+        shell: bash
+        run: |
+          forge install --upgrade --site "retailinmotion.atlassian.net" --product jira --environment development --confirm-scopes --non-interactive
+
+      - name: Delete imported migration rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          output=$(forge webtrigger create --functionKey nuvriqo-oneoff-cleanup --site "retailinmotion.atlassian.net" --product Jira --environment development)
+          echo "$output"
+          url=$(printf '%s\n' "$output" | grep -Eo 'https://[^[:space:]]+' | tail -1)
+          test -n "$url" || (echo "Could not parse webtrigger URL" && exit 1)
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            --data '{"confirm":"DELETE_IMPORTED_20260905"}' \
+            "$url" | tee cleanup-response.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const result = JSON.parse(fs.readFileSync('cleanup-response.json', 'utf8'));
+          if (!result.ok) throw new Error(`Cleanup failed: ${result.error || 'unknown error'}`);
+          if (result.remaining !== 0 || result.enabledBeforeDelete !== 0) {
+            throw new Error(`Unexpected cleanup result: ${JSON.stringify(result)}`);
+          }
+          console.log(`Deleted ${result.deleted} disabled imported rules; remaining=${result.remaining}`);
+          NODE
+
+      - name: Restore Marketplace candidate code
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          clean: true
+
+      - name: Reinstall dependencies for restored code
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; fi
+
+      - name: Test restored Marketplace candidate
+        run: npm test
+
+      - name: Build restored Custom UI resources
+        run: npm run build:ui
+
+      - name: Redeploy clean Marketplace candidate to development
+        run: forge deploy --environment development --non-interactive --approve MAJOR_VERSION_RULE
+
+      - name: Upgrade worksite installation back to clean candidate
+        shell: bash
+        run: |
+          forge install --upgrade --site "retailinmotion.atlassian.net" --product jira --environment development --confirm-scopes --non-interactive
