@@ -58,6 +58,29 @@ test('all configured conditions must match', () => {
   assert.equal(conditionsMatchIssue(rule(), issue({ customfield_10002: { value: 'Software' } })), false);
 });
 
+test('isAnyOf matches any selected Jira value', () => {
+  const multiRule = rule({
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isAnyOf', value: ['Hardware', 'Crew'] }]
+  });
+  assert.equal(conditionsMatchIssue(multiRule, issue({ customfield_10002: { value: 'Crew' } })), true);
+  assert.equal(conditionsMatchIssue(multiRule, issue({ customfield_10002: { value: 'Bond' } })), false);
+});
+
+test('isAnyOf works when the Jira field itself contains multiple values', () => {
+  const multiRule = rule({
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isAnyOf', value: ['Crew', 'Bond'] }]
+  });
+  assert.equal(conditionsMatchIssue(multiRule, issue({ customfield_10002: [{ value: 'Other' }, { value: 'Bond' }] })), true);
+});
+
+test('isNoneOf excludes every selected Jira value', () => {
+  const multiRule = rule({
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isNoneOf', value: ['Training', 'Test'] }]
+  });
+  assert.equal(conditionsMatchIssue(multiRule, issue({ customfield_10002: { value: 'Hardware' } })), true);
+  assert.equal(conditionsMatchIssue(multiRule, issue({ customfield_10002: { value: 'Training' } })), false);
+});
+
 test('rule matching respects project and waiting status', () => {
   assert.equal(ruleMatchesIssue(rule(), issue()), true);
   assert.equal(ruleMatchesIssue(rule(), issue({ status: { name: 'In Progress' } })), false);
@@ -79,6 +102,17 @@ test('selectRule uses priority-sorted rule input', () => {
   const general = rule({ id: 'general', name: 'General', priority: 100, conditions: [] });
   const hardware = rule({ id: 'hardware', priority: 10 });
   assert.equal(selectRule([hardware, general], issue()).id, 'hardware');
+});
+
+test('rule validation accepts multi-value comparisons and rejects empty selections', () => {
+  assert.deepEqual(validateRule(rule({
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isAnyOf', value: ['Crew', 'Bond'] }]
+  })), []);
+
+  const errors = validateRule(rule({
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isAnyOf', value: [] }]
+  }));
+  assert.ok(errors.some((value) => value.includes('needs a value')));
 });
 
 test('rule validation catches invalid reminder ordering and final timing', () => {
