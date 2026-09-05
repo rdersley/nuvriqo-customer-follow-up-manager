@@ -5,9 +5,12 @@ import {
   appendAudit,
   deleteCycle,
   deleteRule,
+  getActiveCycles,
   getAudit,
   getCycle,
+  getRecentAudit,
   getRules,
+  getSchedulerStatus,
   saveCycle,
   saveRule
 } from './storage.js';
@@ -266,6 +269,49 @@ resolver.define('getProjectSetup', async ({ context }) => {
   };
 });
 
+resolver.define('getProjectActivity', async ({ context }) => {
+  const projectKey = projectKeyFromContext(context);
+  if (!projectKey) throw new Error('Project context is unavailable');
+  await ensureProjectAdmin(projectKey);
+
+  const [rules, cycles, audit, scheduler] = await Promise.all([
+    getRules(),
+    getActiveCycles(),
+    getRecentAudit(500),
+    getSchedulerStatus()
+  ]);
+
+  const projectRules = rules.filter((rule) => rule.projectKey === projectKey);
+  const ruleIds = new Set(projectRules.map((rule) => rule.id));
+  const rulesById = new Map(projectRules.map((rule) => [rule.id, rule]));
+  const projectCycles = cycles.filter((cycle) => ruleIds.has(cycle.ruleId));
+  const activity = audit
+    .filter((item) => item?.ruleId && ruleIds.has(item.ruleId))
+    .slice(0, 100)
+    .map((item) => ({
+      ...item,
+      ruleName: item.ruleName ?? rulesById.get(item.ruleId)?.name ?? item.ruleId
+    }));
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEvents = activity.filter((item) => String(item.timestamp ?? '').startsWith(today));
+
+  return {
+    scheduler: scheduler ?? null,
+    summary: {
+      activeFollowUps: projectCycles.length,
+      remindersToday: todayEvents.filter((item) => item.type === 'reminder-comment-sent').length,
+      autoClosesToday: todayEvents.filter((item) => item.type === 'auto-transitioned').length,
+      failuresToday: todayEvents.filter((item) => item.type === 'processing-error').length
+    },
+    activity,
+    activeCycles: projectCycles.slice(0, 100).map((cycle) => ({
+      ...cycle,
+      ruleName: rulesById.get(cycle.ruleId)?.name ?? cycle.ruleId
+    }))
+  };
+});
+
 resolver.define('getFieldOptions', async ({ payload, context }) => {
   const projectKey = projectKeyFromContext(context);
   const fieldId = String(payload?.fieldId ?? '').trim();
@@ -398,7 +444,7 @@ resolver.define('pauseCycle', async ({ context }) => {
   cycle.paused = true;
   cycle.pausedAt = new Date().toISOString();
   await saveCycle(cycle);
-  await appendAudit(issue.id, 'cycle-paused', { issueKey: issue.key });
+  await appendAudit(issue.id, 'cycle-paused', { issueKey: issue.key, ruleId: cycle.ruleId });
   return { ok: true };
 });
 
@@ -414,15 +460,17 @@ resolver.define('resumeCycle', async ({ context }) => {
   cycle.paused = false;
   cycle.pausedAt = null;
   await saveCycle(cycle);
-  await appendAudit(issue.id, 'cycle-resumed', { issueKey: issue.key });
+  await appendAudit(issue.id, 'cycle-resumed', { issueKey: issue.key, ruleId: cycle.ruleId });
   return { ok: true };
 });
 
 resolver.define('cancelCycle', async ({ context }) => {
   const issue = await issueForCycleAction(context);
+  const cycle = await getCycle(issue.id);
   await deleteCycle(issue.id);
   await appendAudit(issue.id, 'cycle-cancelled', {
     issueKey: issue.key,
+    ruleId: cycle?.ruleId,
     reason: 'Cancelled manually by agent'
   });
   return { ok: true };
