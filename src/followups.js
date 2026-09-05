@@ -4,7 +4,7 @@ import {
   getIssue,
   transitionToStatus
 } from './jira.js';
-import { cycleStillMatchesRule, selectRule } from './rules.js';
+import { conditionsMatchIssue, cycleStillMatchesRule, selectRule } from './rules.js';
 import { appendAudit, deleteCycle, getCycle, saveCycle } from './storage.js';
 import { buildTemplateContext, renderTemplate } from './templates.js';
 
@@ -23,14 +23,42 @@ export function elapsedDays(startedAt, now = new Date()) {
   return Math.floor((now.getTime() - new Date(startedAt).getTime()) / DAY_MS);
 }
 
+function rulesCheckedForIssue(rules, issue) {
+  return (rules ?? []).filter((rule) => {
+    if (!rule?.enabled) return false;
+    if (rule.projectKey && issue?.fields?.project?.key !== rule.projectKey) return false;
+    if (rule.waitingStatusName && issue?.fields?.status?.name !== rule.waitingStatusName) return false;
+    return true;
+  });
+}
+
+async function auditRuleChecks(issue, rules, matchedRule, actionByRule = new Map()) {
+  const checked = rulesCheckedForIssue(rules, issue);
+  for (const rule of checked) {
+    const filtersMatched = conditionsMatchIssue(rule, issue);
+    await appendAudit(issue.id, 'rule-check', {
+      issueKey: issue.key,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      filtersMatched,
+      selected: matchedRule?.id === rule.id,
+      action: actionByRule.get(rule.id) ?? 'None'
+    });
+  }
+}
+
 export async function reconcileIssue(issue, rules) {
   const existing = await getCycle(issue.id);
   const rule = selectRule(rules, issue);
 
   if (!rule) {
+    const actions = new Map();
     if (existing?.active) {
       const existingRule = (rules ?? []).find((item) => item.id === existing.ruleId);
-      if (existingRule && cycleStillMatchesRule(existingRule, issue)) return existing;
+      if (existingRule && cycleStillMatchesRule(existingRule, issue)) {
+        await auditRuleChecks(issue, rules, null, actions);
+        return existing;
+      }
       await deleteCycle(issue.id);
       await appendAudit(issue.id, 'cycle-cancelled', {
         issueKey: issue.key,
@@ -38,11 +66,16 @@ export async function reconcileIssue(issue, rules) {
         ruleName: existingRule?.name,
         reason: 'Issue no longer matches an enabled follow-up rule'
       });
+      if (existingRule?.id) actions.set(existingRule.id, 'Follow-up cancelled');
     }
+    await auditRuleChecks(issue, rules, null, actions);
     return null;
   }
 
-  if (existing?.active && existing.ruleId === rule.id) return existing;
+  if (existing?.active && existing.ruleId === rule.id) {
+    await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'None - already active']]));
+    return existing;
+  }
 
   const cycle = {
     issueId: issue.id,
@@ -62,6 +95,7 @@ export async function reconcileIssue(issue, rules) {
     ruleId: rule.id,
     ruleName: rule.name
   });
+  await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'Follow-up started']]));
   return cycle;
 }
 
@@ -142,6 +176,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
       ruleName: rule.name,
+      filtersMatched: conditionsMatchIssue(rule, issue),
       reason: 'Issue no longer matches rule or configured reminder statuses'
     });
     return { action: 'cancelled' };
@@ -168,6 +203,8 @@ export async function processCycle(cycle, rule, now = new Date()) {
         ruleId: rule.id,
         ruleName: rule.name,
         reminderIndex: index,
+        destinationStatusName: reminder.destinationStatusName ?? '',
+        filtersMatched: true,
         after: reminder.afterDays,
         timingUnit: rule?.timingUnit ?? 'days'
       });
@@ -218,6 +255,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
       destinationStatusName: rule.finalAction.destinationStatusName,
       transitionId: transition.id,
       resolutionId: rule.finalAction.resolutionId ?? null,
+      filtersMatched: true,
       after: rule.finalAction.afterDays,
       timingUnit: rule?.timingUnit ?? 'days'
     });
