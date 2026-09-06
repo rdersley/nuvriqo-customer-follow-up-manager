@@ -12,6 +12,8 @@ Forge app for Jira Service Management that manages configurable customer follow-
 - Optional request participant additions before reminders.
 - Configurable waiting status and reminder destination statuses.
 - Active follow-up cycles remain valid in configured reminder destination statuses, so later stages continue from the original cycle start time.
+- Scheduled backlog discovery finds eligible tickets that were already waiting before a cycle existed and seeds timing from the latest Jira transition into the configured waiting status.
+- Newly discovered overdue tickets are processed in the same scheduler run.
 - Final customer-facing message before the closing transition.
 - Final transition by **destination status name** rather than hard-coded transition IDs.
 - Optional resolution and additional transition-field values for final actions.
