@@ -151,16 +151,31 @@ export async function processDueFollowUps(event, context) {
 
   const startedAt = new Date().toISOString();
   const now = new Date();
-  const [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
-  const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
-  const activeIssueIds = new Set(cycles.map((cycle) => cycle.issueId).filter(Boolean));
+  let cycles = [];
+  let rules = [];
   let processed = 0;
   let actions = 0;
   let failures = 0;
   let discoveryChecked = 0;
   let discoveryStarted = 0;
 
+  await saveSchedulerStatus({
+    startedAt,
+    completedAt: null,
+    activeCyclesSeen: 0,
+    discoveryChecked: 0,
+    discoveryStarted: 0,
+    processed: 0,
+    actions: 0,
+    failures: 0,
+    status: 'running'
+  }).catch(() => undefined);
+
   try {
+    [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
+    const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
+    const activeIssueIds = new Set(cycles.map((cycle) => cycle.issueId).filter(Boolean));
+
     const discovery = await discoverMissingCycles(rules, activeIssueIds, now);
     discoveryChecked = discovery.checked;
     discoveryStarted = discovery.started;
@@ -211,6 +226,10 @@ export async function processDueFollowUps(event, context) {
         }).catch(() => undefined);
       }
     }
+  } catch (error) {
+    failures += 1;
+    console.error('Follow-up scheduler failed before cycle processing completed:', error);
+    throw error;
   } finally {
     await saveSchedulerStatus({
       startedAt,
