@@ -35,16 +35,39 @@ function rowForActivity(item) {
   return null;
 }
 
+function actionKind(item) {
+  const text = String(item.actionText ?? '').toLowerCase();
+  if (item.type === 'processing-error') return 'error';
+  if (item.type === 'reminder-completed' || item.type === 'auto-transitioned') {
+    if (text.includes('comment sent')) return 'comment';
+    if (text.includes('status changed')) return 'status';
+    return 'action';
+  }
+  if (item.type === 'cycle-cancelled') return 'lifecycle';
+  if (item.type === 'rule-check') {
+    if (text.includes('follow-up started') || text.includes('follow-up cancelled')) return 'lifecycle';
+    return 'check';
+  }
+  return 'other';
+}
+
+function isConcreteAction(item) {
+  if (item.tone === 'action') return true;
+  if (item.type === 'cycle-cancelled') return true;
+  if (item.type === 'rule-check') return Boolean(item.action && item.action !== 'None' && !item.action.startsWith('None -'));
+  return false;
+}
+
 function TicketLink({ issueKey }) {
   if (!issueKey) return <>—</>;
-  return <button type="button" onClick={() => router.open(`/browse/${issueKey}`)} title={`Open ${issueKey} in Jira`} style={{ border: 0, background: 'transparent', padding: 0, color: '#0c66e4', fontWeight: 750 }}>{issueKey}</button>;
+  return <button type="button" onClick={() => router.open(`/browse/${issueKey}`)} title={`Open ${issueKey} in Jira`} style={{ border: 0, background: 'transparent', padding: 0, color: '#0c66e4', fontWeight: 750, cursor: 'pointer' }}>{issueKey}</button>;
 }
 
 export default function ActivityPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('actions');
   const [query, setQuery] = useState('');
 
   async function load() {
@@ -56,16 +79,29 @@ export default function ActivityPanel() {
 
   useEffect(() => { load(); }, []);
 
+  const allRows = useMemo(() => (data?.activity ?? []).map(rowForActivity).filter(Boolean), [data]);
+
+  const counts = useMemo(() => ({
+    actions: allRows.filter(isConcreteAction).length,
+    comments: allRows.filter((item) => String(item.actionText ?? '').toLowerCase().includes('comment sent')).length,
+    status: allRows.filter((item) => String(item.actionText ?? '').toLowerCase().includes('status changed')).length,
+    lifecycle: allRows.filter((item) => actionKind(item) === 'lifecycle').length,
+    checks: allRows.filter((item) => item.type === 'rule-check').length,
+    errors: allRows.filter((item) => item.type === 'processing-error').length
+  }), [allRows]);
+
   const activity = useMemo(() => {
-    let rows = (data?.activity ?? []).map(rowForActivity).filter(Boolean);
-    if (filter === 'matched') rows = rows.filter((item) => item.filters === 'Matched');
-    if (filter === 'not-matched') rows = rows.filter((item) => item.filters === 'Not matched');
-    if (filter === 'actions') rows = rows.filter((item) => item.tone === 'action' || (item.type === 'rule-check' && item.action && item.action !== 'None' && !item.action.startsWith('None -')));
+    let rows = [...allRows];
+    if (filter === 'actions') rows = rows.filter(isConcreteAction);
+    if (filter === 'comments') rows = rows.filter((item) => String(item.actionText ?? '').toLowerCase().includes('comment sent'));
+    if (filter === 'status') rows = rows.filter((item) => String(item.actionText ?? '').toLowerCase().includes('status changed'));
+    if (filter === 'lifecycle') rows = rows.filter((item) => actionKind(item) === 'lifecycle');
+    if (filter === 'checks') rows = rows.filter((item) => item.type === 'rule-check');
     if (filter === 'errors') rows = rows.filter((item) => item.type === 'processing-error');
     const needle = query.trim().toLowerCase();
-    if (needle) rows = rows.filter((item) => String(item.issueKey ?? '').toLowerCase().includes(needle) || String(item.ruleName ?? item.ruleId ?? '').toLowerCase().includes(needle));
+    if (needle) rows = rows.filter((item) => [item.issueKey, item.ruleName, item.ruleId, item.actionText, item.filters].some((value) => String(value ?? '').toLowerCase().includes(needle)));
     return rows;
-  }, [data, filter, query]);
+  }, [allRows, filter, query]);
 
   if (loading && !data) return <section className="card"><h2>Run history</h2><div className="empty">Loading follow-up activity…</div></section>;
   if (error && !data) return <section className="card"><h2>Run history</h2><div className="notice">{error}</div></section>;
@@ -73,6 +109,16 @@ export default function ActivityPanel() {
   const summary = data?.summary ?? {};
   const scheduler = data?.scheduler;
   const schedulerHealthy = scheduler?.status === 'success';
+
+  const filterOptions = [
+    ['actions', `Actions (${counts.actions})`],
+    ['comments', `Comments (${counts.comments})`],
+    ['status', `Status changes (${counts.status})`],
+    ['lifecycle', `Started / cancelled (${counts.lifecycle})`],
+    ['checks', `Checks (${counts.checks})`],
+    ['errors', `Errors (${counts.errors})`],
+    ['all', 'All activity']
+  ];
 
   return <>
     <section className="activity-stats">
@@ -83,13 +129,13 @@ export default function ActivityPanel() {
       <div className="stat-card"><span>Failures today</span><strong>{summary.failuresToday ?? 0}</strong><small className={(summary.failuresToday ?? 0) > 0 ? 'status-warn' : 'status-ok'}>{(summary.failuresToday ?? 0) > 0 ? 'Needs attention' : 'No failures recorded'}</small></div>
     </section>
 
-    {scheduler && <section className="card scheduler-card"><div><h2>Scheduler health</h2><p className="muted">Heartbeat from the scheduled check of active follow-ups.</p></div><div className="scheduler-metrics"><span><strong>{scheduler.activeCyclesSeen ?? 0}</strong> cycles seen</span><span><strong>{scheduler.processed ?? 0}</strong> processed</span><span><strong>{scheduler.actions ?? 0}</strong> actions</span><span><strong>{scheduler.failures ?? 0}</strong> failures</span></div></section>}
+    {scheduler && <section className="card scheduler-card"><div><h2>Scheduler health</h2><p className="muted">Heartbeat from the scheduled check of active follow-ups and eligible backlog tickets.</p></div><div className="scheduler-metrics"><span><strong>{scheduler.activeCyclesSeen ?? 0}</strong> cycles seen</span><span><strong>{scheduler.processed ?? 0}</strong> processed</span><span><strong>{scheduler.actions ?? 0}</strong> actions</span><span><strong>{scheduler.failures ?? 0}</strong> failures</span></div></section>}
 
     <section className="card">
-      <div className="section-head"><div><h2>Run history</h2><p className="muted">See the ticket check, filter result and concrete Jira actions completed by Nuvriqo.</p></div><button onClick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button></div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, margin: '16px 0', flexWrap: 'wrap' }}><div className="activity-filters" style={{ margin: 0 }}>{[['all','All'],['matched','Matched'],['not-matched','Not matched'],['actions','Actions'],['errors','Errors']].map(([value,label]) => <button key={value} className={filter === value ? 'filter-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find ticket or rule…" aria-label="Find ticket or rule" style={{ width: 280, maxWidth: '100%' }} /></div>
+      <div className="section-head"><div><h2>Run history</h2><p className="muted">Actions are shown first so you can quickly verify customer comments, status changes and follow-up lifecycle events. Use Checks when you need the detailed rule evaluation trail.</p></div><button onClick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button></div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, margin: '16px 0', flexWrap: 'wrap' }}><div className="activity-filters" style={{ margin: 0 }}>{filterOptions.map(([value,label]) => <button key={value} className={filter === value ? 'filter-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find ticket, rule or action…" aria-label="Find ticket, rule or action" style={{ width: 300, maxWidth: '100%' }} /></div>
       {error && <div className="notice">{error}</div>}
-      {activity.length === 0 ? <div className="empty">No matching activity has been recorded yet.</div> : <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Filters</th><th>Action</th></tr></thead><tbody>{activity.map((item,index) => <tr key={`${item.timestamp}-${item.issueId}-${item.type}-${index}`}><td>{formatDate(item.timestamp)}</td><td><TicketLink issueKey={item.issueKey || item.issueId} /></td><td>{item.ruleName || item.ruleId || '—'}</td><td><span className={`result-pill ${item.filters === 'Matched' ? 'result-success' : ''}`}>{item.filters}</span></td><td>{item.tone === 'error' ? <span className="result-pill result-error">{item.actionText}</span> : item.actionText}</td></tr>)}</tbody></table></div>}
+      {activity.length === 0 ? <div className="empty">No matching activity has been recorded yet.</div> : <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Result</th><th>Action taken</th></tr></thead><tbody>{activity.map((item,index) => <tr key={`${item.timestamp}-${item.issueId}-${item.type}-${index}`}><td>{formatDate(item.timestamp)}</td><td><TicketLink issueKey={item.issueKey || item.issueId} /></td><td>{item.ruleName || item.ruleId || '—'}</td><td><span className={`result-pill ${item.filters === 'Matched' ? 'result-success' : ''}`}>{item.filters}</span></td><td>{item.tone === 'error' ? <span className="result-pill result-error">{item.actionText}</span> : <strong style={isConcreteAction(item) ? { fontWeight: 700 } : { fontWeight: 500 }}>{item.actionText}</strong>}</td></tr>)}</tbody></table></div>}
     </section>
 
     <section className="card"><h2>Active follow-ups</h2>{(data?.activeCycles ?? []).length === 0 ? <div className="empty">No active follow-up cycles in this project.</div> : <div className="rules">{data.activeCycles.map((cycle) => <div className="rule" key={cycle.issueId}><div><div className="rule-title"><TicketLink issueKey={cycle.issueKey} /></div><div className="muted">{cycle.ruleName} · started {formatDate(cycle.startedAt)}{cycle.paused ? ' · paused' : ''}</div></div>{cycle.lastError && <span className="result-pill result-error">Last run failed</span>}</div>)}</div>}</section>
