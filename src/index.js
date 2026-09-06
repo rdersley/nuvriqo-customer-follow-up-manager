@@ -1,5 +1,6 @@
-import { getIssue, getRequestComment, getRequestParticipants } from './jira.js';
-import { cancelForCustomerReply, processCycle, reconcileIssue } from './followups.js';
+import { getIssue, getRequestComment, getRequestParticipants, getStatusEnteredAt, searchIssues } from './jira.js';
+import { cancelForCustomerReply, cycleStartForDiscovery, processCycle, reconcileIssue } from './followups.js';
+import { getRuleConditions } from './rules.js';
 import {
   appendAudit,
   deleteCycle,
@@ -20,6 +21,39 @@ function invocationContext(event, context) {
 
 function licenseAllows(context) {
   return context?.license == null || context.license.active === true;
+}
+
+function jqlQuote(value) {
+  return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+export function buildDiscoveryJql(projectKey, waitingStatusName) {
+  return `project = ${jqlQuote(projectKey)} AND status = ${jqlQuote(waitingStatusName)}`;
+}
+
+function discoveryGroups(rules) {
+  const groups = new Map();
+  for (const rule of rules ?? []) {
+    if (!rule?.enabled || !rule.projectKey || !rule.waitingStatusName) continue;
+    const key = `${rule.projectKey}\u0000${rule.waitingStatusName}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        projectKey: rule.projectKey,
+        waitingStatusName: rule.waitingStatusName,
+        rules: []
+      });
+    }
+    groups.get(key).rules.push(rule);
+  }
+  return [...groups.values()];
+}
+
+function discoveryFields(rules) {
+  return [
+    'project',
+    'status',
+    ...new Set((rules ?? []).flatMap((rule) => getRuleConditions(rule).map((condition) => condition.fieldId)))
+  ];
 }
 
 export async function onIssueUpdated(event, context) {
@@ -61,17 +95,78 @@ export async function onCommentCreated(event, context) {
   }
 }
 
+async function discoverMissingCycles(rules, activeIssueIds, now) {
+  let checked = 0;
+  let started = 0;
+  let actions = 0;
+  let failures = 0;
+
+  for (const group of discoveryGroups(rules)) {
+    try {
+      const issues = await searchIssues(
+        buildDiscoveryJql(group.projectKey, group.waitingStatusName),
+        discoveryFields(group.rules)
+      );
+
+      for (const issue of issues) {
+        checked += 1;
+        if (!issue?.id || !issue?.key || activeIssueIds.has(issue.id)) continue;
+
+        try {
+          const statusEnteredAt = await getStatusEnteredAt(issue.key, group.waitingStatusName);
+          const cycle = await reconcileIssue(issue, group.rules, {
+            startedAt: cycleStartForDiscovery(issue, statusEnteredAt, now),
+            source: 'scheduler-discovery'
+          });
+          if (!cycle?.active) continue;
+
+          activeIssueIds.add(issue.id);
+          started += 1;
+
+          const rule = group.rules.find((item) => item.id === cycle.ruleId);
+          if (!rule) continue;
+          const result = await processCycle(cycle, rule, now);
+          if (result?.action && result.action !== 'none' && result.action !== 'paused') actions += 1;
+        } catch (error) {
+          failures += 1;
+          const message = error?.message || String(error);
+          console.error(`Failed discovering ${issue.key}:`, error);
+          await appendAudit(issue.id, 'processing-error', {
+            issueKey: issue.key,
+            message: `Scheduler discovery failed: ${message}`
+          }).catch(() => undefined);
+        }
+      }
+    } catch (error) {
+      failures += 1;
+      console.error(`Failed scheduler discovery for ${group.projectKey}/${group.waitingStatusName}:`, error);
+    }
+  }
+
+  return { checked, started, actions, failures };
+}
+
 export async function processDueFollowUps(event, context) {
   if (!licenseAllows(invocationContext(event, context))) return;
 
   const startedAt = new Date().toISOString();
+  const now = new Date();
   const [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
   const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
+  const activeIssueIds = new Set(cycles.map((cycle) => cycle.issueId).filter(Boolean));
   let processed = 0;
   let actions = 0;
   let failures = 0;
+  let discoveryChecked = 0;
+  let discoveryStarted = 0;
 
   try {
+    const discovery = await discoverMissingCycles(rules, activeIssueIds, now);
+    discoveryChecked = discovery.checked;
+    discoveryStarted = discovery.started;
+    actions += discovery.actions;
+    failures += discovery.failures;
+
     for (const cycle of cycles) {
       const rule = rulesById.get(cycle.ruleId);
 
@@ -88,7 +183,7 @@ export async function processDueFollowUps(event, context) {
 
       processed += 1;
       try {
-        const result = await processCycle(cycle, rule);
+        const result = await processCycle(cycle, rule, now);
         if (result?.action && result.action !== 'none' && result.action !== 'paused') actions += 1;
         const latest = await getCycle(cycle.issueId);
         if (latest?.lastError) {
@@ -121,6 +216,8 @@ export async function processDueFollowUps(event, context) {
       startedAt,
       completedAt: new Date().toISOString(),
       activeCyclesSeen: cycles.length,
+      discoveryChecked,
+      discoveryStarted,
       processed,
       actions,
       failures,
