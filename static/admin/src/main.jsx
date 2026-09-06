@@ -484,10 +484,18 @@ function App() {
       {!editing && view === 'rules' && <button className="primary" onClick={() => setEditing(emptyRule(setup.projectKey))}>Create rule</button>}
     </div>
 
-    {!editing && <div className="top-tabs">
-      <button className={view === 'rules' ? 'tab-active' : ''} onClick={() => setView('rules')}>Rules</button>
-      <button className={view === 'activity' ? 'tab-active' : ''} onClick={() => setView('activity')}>Run history</button>
-    </div>}
+    <div className="top-tabs">
+      <button className={(view === 'rules' || editing) ? 'tab-active' : ''} onClick={() => {
+        if (editing && !confirm('Leave this rule without saving your changes?')) return;
+        setEditing(null);
+        setView('rules');
+      }}>Rules</button>
+      <button className={!editing && view === 'activity' ? 'tab-active' : ''} onClick={() => {
+        if (editing && !confirm('Leave this rule without saving your changes?')) return;
+        setEditing(null);
+        setView('activity');
+      }}>Run history</button>
+    </div>
 
     {message && <div className="notice">{message}</div>}
 
