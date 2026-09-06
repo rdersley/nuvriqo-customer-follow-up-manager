@@ -15,6 +15,11 @@ function unitMs(rule) { return rule?.timingUnit === 'hours' ? HOUR_MS : DAY_MS; 
 export function elapsedUnits(startedAt, rule, now = new Date()) { return Math.floor((now.getTime() - new Date(startedAt).getTime()) / unitMs(rule)); }
 export function elapsedDays(startedAt, now = new Date()) { return Math.floor((now.getTime() - new Date(startedAt).getTime()) / DAY_MS); }
 
+export function cycleStartForDiscovery(issue, statusEnteredAt, now = new Date()) {
+  if (statusEnteredAt && Number.isFinite(new Date(statusEnteredAt).getTime())) return statusEnteredAt;
+  return now.toISOString();
+}
+
 function rulesCheckedForIssue(rules, issue) {
   return (rules ?? []).filter((rule) => {
     if (!rule?.enabled) return false;
@@ -37,7 +42,7 @@ async function auditRuleChecks(issue, rules, matchedRule, actionByRule = new Map
   }
 }
 
-export async function reconcileIssue(issue, rules) {
+export async function reconcileIssue(issue, rules, options = {}) {
   const existing = await getCycle(issue.id);
   const rule = selectRule(rules, issue);
   if (!rule) {
@@ -59,9 +64,20 @@ export async function reconcileIssue(issue, rules) {
     await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'None - already active']]));
     return existing;
   }
-  const cycle = { issueId: issue.id, issueKey: issue.key, ruleId: rule.id, active: true, paused: false, pausedAt: null, startedAt: new Date().toISOString(), completedReminderIndexes: [], reminderProgress: {}, finalActionProgress: {} };
+  const cycle = {
+    issueId: issue.id,
+    issueKey: issue.key,
+    ruleId: rule.id,
+    active: true,
+    paused: false,
+    pausedAt: null,
+    startedAt: options.startedAt ?? new Date().toISOString(),
+    completedReminderIndexes: [],
+    reminderProgress: {},
+    finalActionProgress: {}
+  };
   await saveCycle(cycle);
-  await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name });
+  await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name, startedAt: cycle.startedAt, source: options.source ?? 'issue-update' });
   await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'Follow-up started']]));
   return cycle;
 }
