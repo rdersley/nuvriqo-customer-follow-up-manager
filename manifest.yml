@@ -48,6 +48,7 @@ modules:
       handler: index.onCommentCreated
     - key: followup-processor
       handler: index.processDueFollowUps
+      timeoutSeconds: 900
     - key: privacy-handler
       handler: privacy.processPrivacy
     - key: ui-resolver
