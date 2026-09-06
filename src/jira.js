@@ -13,6 +13,68 @@ export async function getIssue(issueKey) {
   return jsonOrThrow(response, `Get issue ${issueKey}`);
 }
 
+export async function searchIssues(jql, fields = ['project', 'status']) {
+  const results = [];
+  let nextPageToken = null;
+
+  do {
+    const body = {
+      jql,
+      maxResults: 100,
+      fields: [...new Set(fields.filter(Boolean))]
+    };
+    if (nextPageToken) body.nextPageToken = nextPageToken;
+
+    const response = await api.asApp().requestJira(route`/rest/api/3/search/jql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await jsonOrThrow(response, 'Search Jira issues');
+    results.push(...(data?.issues ?? []));
+    nextPageToken = data?.nextPageToken ?? null;
+  } while (nextPageToken);
+
+  return results;
+}
+
+export function latestStatusEnteredAt(histories, statusName) {
+  const target = String(statusName ?? '').toLowerCase();
+  let latest = null;
+
+  for (const history of histories ?? []) {
+    const entered = (history?.items ?? []).some((item) =>
+      String(item?.field ?? '').toLowerCase() === 'status' &&
+      String(item?.toString ?? '').toLowerCase() === target
+    );
+    if (!entered || !history?.created) continue;
+    if (!latest || new Date(history.created).getTime() > new Date(latest).getTime()) {
+      latest = history.created;
+    }
+  }
+
+  return latest;
+}
+
+export async function getStatusEnteredAt(issueKey, statusName) {
+  const histories = [];
+  let startAt = 0;
+  const maxResults = 100;
+
+  while (true) {
+    const response = await api.asApp().requestJira(
+      route`/rest/api/3/issue/${issueKey}/changelog?startAt=${startAt}&maxResults=${maxResults}`
+    );
+    const data = await jsonOrThrow(response, `Get changelog for ${issueKey}`);
+    histories.push(...(data?.values ?? []));
+    const total = Number(data?.total ?? histories.length);
+    startAt += Number(data?.maxResults ?? maxResults);
+    if (startAt >= total || !(data?.values ?? []).length) break;
+  }
+
+  return latestStatusEnteredAt(histories, statusName);
+}
+
 export async function getRequestComment(issueKey, commentId) {
   const response = await api.asApp().requestJira(route`/rest/servicedeskapi/request/${issueKey}/comment/${commentId}`);
   return jsonOrThrow(response, `Get JSM comment ${commentId} on ${issueKey}`);
