@@ -22,6 +22,8 @@ jobs:
       DEPLOY_SITE: retailinmotion.atlassian.net
       DEPLOY_PRODUCT: jira
       DEPLOY_ENVIRONMENT: development
+      CI: true
+      FORGE_CLI_ANALYTICS: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,7 +39,7 @@ jobs:
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
           npm install --global @forge/cli
-          forge settings set usage-analytics false
+          printf 'n\n' | forge settings set usage-analytics false || true
           forge settings set default-environment development
       - name: Run tests
         run: npm test
