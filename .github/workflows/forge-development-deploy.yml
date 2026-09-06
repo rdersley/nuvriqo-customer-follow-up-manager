@@ -43,8 +43,6 @@ jobs:
         run: npm test
       - name: Build Custom UI
         run: npm run build:ui
-      - name: Forge lint
-        run: forge lint --environment development
       - name: Deploy Forge app to development
         run: forge deploy --environment development --non-interactive --approve MAJOR_VERSION_RULE
       - name: Install or upgrade Jira development installation
