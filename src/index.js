@@ -5,7 +5,6 @@ import {
   appendAudit,
   deleteCycle,
   getActiveCycles,
-  getCycle,
   getRules,
   saveCycle,
   saveSchedulerStatus
@@ -200,24 +199,24 @@ export async function processDueFollowUps(event, context) {
       try {
         const result = await processCycle(cycle, rule, now);
         if (result?.action && result.action !== 'none' && result.action !== 'paused') actions += 1;
-        const latest = await getCycle(cycle.issueId);
-        if (latest?.lastError) {
-          delete latest.lastError;
-          await saveCycle(latest);
+        // processCycle mutates/saves this in-memory cycle when work is done.
+        // Avoid one KVS get per active cycle just to clear a prior error.
+        if (cycle.lastError) {
+          delete cycle.lastError;
+          await saveCycle(cycle);
         }
       } catch (error) {
         failures += 1;
         const message = error?.message || String(error);
         console.error(`Failed processing ${cycle.issueKey}:`, error);
 
-        const latest = await getCycle(cycle.issueId).catch(() => cycle);
-        if (latest) {
-          latest.lastError = {
-            message,
-            occurredAt: new Date().toISOString()
-          };
-          await saveCycle(latest).catch(() => undefined);
-        }
+        // The scheduler already loaded the full cycle set at the start of this run.
+        // Reuse that object rather than reading the same KVS key again on failure.
+        cycle.lastError = {
+          message,
+          occurredAt: new Date().toISOString()
+        };
+        await saveCycle(cycle).catch(() => undefined);
 
         await appendAudit(cycle.issueId, 'processing-error', {
           issueKey: cycle.issueKey,
