@@ -114,8 +114,10 @@ function cycleRef(cycle) {
     issueId: cycle.issueId,
     issueKey: cycle.issueKey,
     ruleId: cycle.ruleId,
+    startedAt: cycle.startedAt ?? null,
     nextDueAt: cycle.nextDueAt ?? null,
-    paused: cycle.paused === true
+    paused: cycle.paused === true,
+    active: cycle.active !== false
   };
 }
 
@@ -195,6 +197,10 @@ export async function deleteCycle(issueId, knownCycle = null) {
 }
 
 export async function getActiveCycles() {
+  const index = await readDueIndex();
+  if (index.migrated === true) {
+    return Object.values(index.refs ?? {}).filter((cycle) => cycle.active !== false);
+  }
   const results = await queryByPrefix(CYCLE_PREFIX);
   return results.map((item) => item.value).filter((cycle) => cycle.active);
 }
