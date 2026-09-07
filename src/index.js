@@ -1,11 +1,16 @@
 import { getIssue, getRequestComment, getRequestParticipants, getStatusEnteredAt, searchIssues } from './jira.js';
-import { cancelForCustomerReply, cycleStartForDiscovery, processCycle, reconcileIssue } from './followups.js';
+import { cancelForCustomerReply, cycleStartForDiscovery, nextDueAtForCycle, processCycle, reconcileIssue } from './followups.js';
 import { getRuleConditions } from './rules.js';
 import {
   appendAudit,
   deleteCycle,
+  dueIndexMigrated,
   getActiveCycles,
+  getCycle,
+  getCycleRefs,
+  getDueCycleRefs,
   getRules,
+  replaceDueIndex,
   saveCycle,
   saveSchedulerStatus
 } from './storage.js';
@@ -145,13 +150,24 @@ async function discoverMissingCycles(rules, activeIssueIds, now) {
   return { checked, started, actions, failures };
 }
 
+async function ensureDueIndex(rules) {
+  if (await dueIndexMigrated()) return;
+
+  const cycles = await getActiveCycles();
+  const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
+  for (const cycle of cycles) {
+    const rule = rulesById.get(cycle.ruleId);
+    if (rule) cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
+  }
+  await replaceDueIndex(cycles);
+}
+
 export async function processDueFollowUps(event, context) {
   if (!licenseAllows(invocationContext(event, context))) return;
 
   const startedAt = new Date().toISOString();
   const now = new Date();
-  let cycles = [];
-  let rules = [];
+  let activeRefs = [];
   let processed = 0;
   let actions = 0;
   let failures = 0;
@@ -162,6 +178,7 @@ export async function processDueFollowUps(event, context) {
     startedAt,
     completedAt: null,
     activeCyclesSeen: 0,
+    dueCyclesSeen: 0,
     discoveryChecked: 0,
     discoveryStarted: 0,
     processed: 0,
@@ -171,9 +188,28 @@ export async function processDueFollowUps(event, context) {
   }).catch(() => undefined);
 
   try {
-    [cycles, rules] = await Promise.all([getActiveCycles(), getRules()]);
+    const rules = await getRules();
+    await ensureDueIndex(rules);
+
     const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
-    const activeIssueIds = new Set(cycles.map((cycle) => cycle.issueId).filter(Boolean));
+    activeRefs = await getCycleRefs();
+    const activeIssueIds = new Set(activeRefs.map((ref) => ref.issueId).filter(Boolean));
+
+    // Clean up cycles whose rules were disabled/deleted using the compact index.
+    for (const ref of activeRefs) {
+      const rule = rulesById.get(ref.ruleId);
+      if (rule?.enabled) continue;
+      const cycle = await getCycle(ref.issueId).catch(() => null);
+      if (!cycle) continue;
+      await deleteCycle(cycle.issueId, cycle).catch(() => undefined);
+      await appendAudit(cycle.issueId, 'cycle-cancelled', {
+        issueKey: cycle.issueKey,
+        ruleId: cycle.ruleId,
+        reason: rule ? 'Follow-up rule was disabled' : 'Follow-up rule was deleted'
+      }).catch(() => undefined);
+      activeIssueIds.delete(cycle.issueId);
+      actions += 1;
+    }
 
     const discovery = await discoverMissingCycles(rules, activeIssueIds, now);
     discoveryChecked = discovery.checked;
@@ -181,26 +217,18 @@ export async function processDueFollowUps(event, context) {
     actions += discovery.actions;
     failures += discovery.failures;
 
-    for (const cycle of cycles) {
-      const rule = rulesById.get(cycle.ruleId);
+    const dueRefs = await getDueCycleRefs(now);
+    for (const ref of dueRefs) {
+      const rule = rulesById.get(ref.ruleId);
+      if (!rule?.enabled) continue;
 
-      if (!rule?.enabled) {
-        await deleteCycle(cycle.issueId).catch(() => undefined);
-        await appendAudit(cycle.issueId, 'cycle-cancelled', {
-          issueKey: cycle.issueKey,
-          ruleId: cycle.ruleId,
-          reason: rule ? 'Follow-up rule was disabled' : 'Follow-up rule was deleted'
-        }).catch(() => undefined);
-        actions += 1;
-        continue;
-      }
+      const cycle = await getCycle(ref.issueId);
+      if (!cycle?.active) continue;
 
       processed += 1;
       try {
         const result = await processCycle(cycle, rule, now);
         if (result?.action && result.action !== 'none' && result.action !== 'paused') actions += 1;
-        // processCycle mutates/saves this in-memory cycle when work is done.
-        // Avoid one KVS get per active cycle just to clear a prior error.
         if (cycle.lastError) {
           delete cycle.lastError;
           await saveCycle(cycle);
@@ -210,8 +238,6 @@ export async function processDueFollowUps(event, context) {
         const message = error?.message || String(error);
         console.error(`Failed processing ${cycle.issueKey}:`, error);
 
-        // The scheduler already loaded the full cycle set at the start of this run.
-        // Reuse that object rather than reading the same KVS key again on failure.
         cycle.lastError = {
           message,
           occurredAt: new Date().toISOString()
@@ -230,10 +256,12 @@ export async function processDueFollowUps(event, context) {
     console.error('Follow-up scheduler failed before cycle processing completed:', error);
     throw error;
   } finally {
+    const dueRefsNow = await getDueCycleRefs(new Date()).catch(() => []);
     await saveSchedulerStatus({
       startedAt,
       completedAt: new Date().toISOString(),
-      activeCyclesSeen: cycles.length,
+      activeCyclesSeen: activeRefs.length,
+      dueCyclesSeen: dueRefsNow.length,
       discoveryChecked,
       discoveryStarted,
       processed,
