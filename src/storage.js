@@ -174,8 +174,19 @@ export async function getCycle(issueId) {
 }
 
 export async function saveCycle(cycle) {
+  const indexChanged =
+    cycle?._indexedDueAt !== (cycle?.nextDueAt ?? null) ||
+    cycle?._indexedPaused !== (cycle?.paused === true) ||
+    cycle?._indexedRuleId !== cycle?.ruleId;
+
+  if (indexChanged) {
+    await upsertCycleRef(cycle);
+    cycle._indexedDueAt = cycle.nextDueAt ?? null;
+    cycle._indexedPaused = cycle.paused === true;
+    cycle._indexedRuleId = cycle.ruleId;
+  }
+
   await kvs.set(`${CYCLE_PREFIX}${cycle.issueId}`, cycle);
-  await upsertCycleRef(cycle);
 }
 
 export async function deleteCycle(issueId, knownCycle = null) {
