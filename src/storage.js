@@ -6,7 +6,9 @@ const AUDIT_PREFIX = 'audit:';
 const ACCOUNT_PREFIX = 'account:';
 const SYSTEM_PREFIX = 'system:';
 const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
+const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const AUDIT_RETENTION_DAYS = 180;
+const RECENT_AUDIT_LIMIT = 500;
 
 async function queryByPrefix(prefix) {
   const results = [];
@@ -145,14 +147,27 @@ export async function getActiveCycles() {
   return results.map((item) => item.value).filter((cycle) => cycle.active);
 }
 
+async function addRecentAudit(event) {
+  // Keep a compact dashboard feed so Run History is a single small KVS read
+  // instead of scanning every retained per-ticket audit record on each refresh.
+  const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
+  const events = [event, ...(current?.events ?? [])]
+    .filter((item) => item?.timestamp)
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, RECENT_AUDIT_LIMIT);
+  await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
+}
+
 export async function appendAudit(issueId, type, details = {}) {
   const timestamp = new Date().toISOString();
+  const event = { issueId, timestamp, type, ...details };
   const key = `${AUDIT_PREFIX}${issueId}:${timestamp}:${Math.random().toString(36).slice(2, 8)}`;
   await kvs.set(
     key,
-    { issueId, timestamp, type, ...details },
+    event,
     { ttl: { unit: 'DAYS', value: AUDIT_RETENTION_DAYS } }
   );
+  await addRecentAudit(event);
 }
 
 export async function getAudit(issueId) {
@@ -163,12 +178,20 @@ export async function getAudit(issueId) {
 }
 
 export async function getRecentAudit(limit = 250) {
+  const requested = Math.max(1, Math.min(Number(limit) || 250, RECENT_AUDIT_LIMIT));
+  const recent = await kvs.get(RECENT_AUDIT_KEY);
+  if (Array.isArray(recent?.events)) return recent.events.slice(0, requested);
+
+  // One-time compatibility bootstrap for installations created before the
+  // compact recent-audit feed existed. Subsequent dashboard loads use one read.
   const results = await queryByPrefix(AUDIT_PREFIX);
-  return results
+  const events = results
     .map((item) => item.value)
     .filter((item) => item?.timestamp)
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .slice(0, Math.max(1, Math.min(Number(limit) || 250, 1000)));
+    .slice(0, RECENT_AUDIT_LIMIT);
+  await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
+  return events.slice(0, requested);
 }
 
 export async function saveSchedulerStatus(status) {
