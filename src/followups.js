@@ -20,6 +20,24 @@ export function cycleStartForDiscovery(issue, statusEnteredAt, now = new Date())
   return now.toISOString();
 }
 
+export function nextDueAtForCycle(cycle, rule) {
+  if (!cycle?.startedAt || !rule) return null;
+  const started = new Date(cycle.startedAt).getTime();
+  if (!Number.isFinite(started)) return null;
+  const completed = new Set(cycle.completedReminderIndexes ?? []);
+
+  for (let index = 0; index < (rule.reminders ?? []).length; index += 1) {
+    if (completed.has(index)) continue;
+    const amount = Number(rule.reminders[index]?.afterDays);
+    if (Number.isFinite(amount)) return new Date(started + amount * unitMs(rule)).toISOString();
+  }
+
+  const finalAmount = Number(rule?.finalAction?.afterDays);
+  return Number.isFinite(finalAmount)
+    ? new Date(started + finalAmount * unitMs(rule)).toISOString()
+    : null;
+}
+
 function rulesCheckedForIssue(rules, issue) {
   return (rules ?? []).filter((rule) => {
     if (!rule?.enabled) return false;
@@ -58,7 +76,7 @@ export async function reconcileIssue(issue, rules, options = {}) {
       if (existingRule && cycleStillMatchesRule(existingRule, issue)) {
         return existing;
       }
-      await deleteCycle(issue.id);
+      await deleteCycle(issue.id, existing);
       await appendAudit(issue.id, 'cycle-cancelled', { issueKey: issue.key, ruleId: existing.ruleId, ruleName: existingRule?.name, reason: 'Issue no longer matches an enabled follow-up rule' });
       if (existingRule?.id) actions.set(existingRule.id, 'Follow-up cancelled');
     }
@@ -80,8 +98,9 @@ export async function reconcileIssue(issue, rules, options = {}) {
     reminderProgress: {},
     finalActionProgress: {}
   };
+  cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
   await saveCycle(cycle);
-  await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name, startedAt: cycle.startedAt, source: options.source ?? 'issue-update' });
+  await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name, startedAt: cycle.startedAt, nextDueAt: cycle.nextDueAt, source: options.source ?? 'issue-update' });
   await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'Follow-up started']]), { includeNoAction: true });
   return cycle;
 }
@@ -89,7 +108,7 @@ export async function reconcileIssue(issue, rules, options = {}) {
 export async function cancelForCustomerReply(issueId, issueKey) {
   const cycle = await getCycle(issueId);
   if (!cycle?.active) return false;
-  await deleteCycle(issueId);
+  await deleteCycle(issueId, cycle);
   await appendAudit(issueId, 'cycle-cancelled', { issueKey, ruleId: cycle.ruleId, reason: 'Customer replied' });
   return true;
 }
@@ -129,7 +148,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
   if (cycle.paused) return { action: 'paused' };
   const issue = await getIssue(cycle.issueKey);
   if (!cycleStillMatchesRule(rule, issue)) {
-    await deleteCycle(cycle.issueId);
+    await deleteCycle(cycle.issueId, cycle);
     await appendAudit(cycle.issueId, 'cycle-cancelled', { issueKey: cycle.issueKey, ruleId: rule.id, ruleName: rule.name, filtersMatched: conditionsMatchIssue(rule, issue), reason: 'Issue no longer matches rule or configured reminder statuses' });
     return { action: 'cancelled' };
   }
@@ -144,6 +163,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
       const progress = await processReminderActions(cycle, rule, issue, reminder, index, context);
       completed.add(index);
       cycle.completedReminderIndexes = [...completed].sort((a, b) => a - b);
+      cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
       await saveCycle(cycle);
       await appendAudit(cycle.issueId, 'reminder-completed', {
         issueKey: cycle.issueKey,
@@ -156,7 +176,8 @@ export async function processCycle(cycle, rule, now = new Date()) {
         statusChanged: progress.statusChanged === true,
         participantCount: (reminder.participantAccountIds ?? []).length,
         after: reminder.afterDays,
-        timingUnit: rule?.timingUnit ?? 'days'
+        timingUnit: rule?.timingUnit ?? 'days',
+        nextDueAt: cycle.nextDueAt
       });
       return { action: 'reminder', reminderIndex: index };
     }
@@ -180,7 +201,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
     else if (rule.finalAction.resolutionName) transitionFields.resolution = { name: rule.finalAction.resolutionName };
     Object.assign(transitionFields, rule.finalAction.fields ?? {});
     const transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields);
-    await deleteCycle(cycle.issueId);
+    await deleteCycle(cycle.issueId, cycle);
     await appendAudit(cycle.issueId, 'auto-transitioned', {
       issueKey: cycle.issueKey,
       ruleId: rule.id,
@@ -197,5 +218,8 @@ export async function processCycle(cycle, rule, now = new Date()) {
     });
     return { action: 'transitioned', transitionId: transition.id };
   }
+
+  cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
+  await saveCycle(cycle);
   return { action: 'none' };
 }
