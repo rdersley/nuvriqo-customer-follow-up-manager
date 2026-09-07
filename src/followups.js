@@ -29,15 +29,19 @@ function rulesCheckedForIssue(rules, issue) {
   });
 }
 
-async function auditRuleChecks(issue, rules, matchedRule, actionByRule = new Map()) {
-  for (const rule of rulesCheckedForIssue(rules, issue)) {
+async function auditRuleChecks(issue, rules, matchedRule, actionByRule = new Map(), options = {}) {
+  const checked = rulesCheckedForIssue(rules, issue);
+  for (const rule of checked) {
+    const action = actionByRule.get(rule.id) ?? 'None';
+    const meaningful = action !== 'None' && !action.startsWith('None -');
+    if (!meaningful && options.includeNoAction !== true) continue;
     await appendAudit(issue.id, 'rule-check', {
       issueKey: issue.key,
       ruleId: rule.id,
       ruleName: rule.name,
       filtersMatched: conditionsMatchIssue(rule, issue),
       selected: matchedRule?.id === rule.id,
-      action: actionByRule.get(rule.id) ?? 'None'
+      action
     });
   }
 }
@@ -45,23 +49,23 @@ async function auditRuleChecks(issue, rules, matchedRule, actionByRule = new Map
 export async function reconcileIssue(issue, rules, options = {}) {
   const existing = await getCycle(issue.id);
   const rule = selectRule(rules, issue);
+  const includeNoAction = options.source === 'scheduler-discovery';
+
   if (!rule) {
     const actions = new Map();
     if (existing?.active) {
       const existingRule = (rules ?? []).find((item) => item.id === existing.ruleId);
       if (existingRule && cycleStillMatchesRule(existingRule, issue)) {
-        await auditRuleChecks(issue, rules, null, actions);
         return existing;
       }
       await deleteCycle(issue.id);
       await appendAudit(issue.id, 'cycle-cancelled', { issueKey: issue.key, ruleId: existing.ruleId, ruleName: existingRule?.name, reason: 'Issue no longer matches an enabled follow-up rule' });
       if (existingRule?.id) actions.set(existingRule.id, 'Follow-up cancelled');
     }
-    await auditRuleChecks(issue, rules, null, actions);
+    await auditRuleChecks(issue, rules, null, actions, { includeNoAction });
     return null;
   }
   if (existing?.active && existing.ruleId === rule.id) {
-    await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'None - already active']]));
     return existing;
   }
   const cycle = {
@@ -78,7 +82,7 @@ export async function reconcileIssue(issue, rules, options = {}) {
   };
   await saveCycle(cycle);
   await appendAudit(issue.id, 'cycle-started', { issueKey: issue.key, ruleId: rule.id, ruleName: rule.name, startedAt: cycle.startedAt, source: options.source ?? 'issue-update' });
-  await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'Follow-up started']]));
+  await auditRuleChecks(issue, rules, rule, new Map([[rule.id, 'Follow-up started']]), { includeNoAction: true });
   return cycle;
 }
 
