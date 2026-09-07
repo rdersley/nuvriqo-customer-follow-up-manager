@@ -14,6 +14,8 @@ Forge app for Jira Service Management that manages configurable customer follow-
 - Active follow-up cycles remain valid in configured reminder destination statuses, so later stages continue from the original cycle start time.
 - Scheduled backlog discovery finds eligible tickets that were already waiting before a cycle existed and seeds timing from the latest Jira transition into the configured waiting status.
 - Newly discovered overdue tickets are processed in the same scheduler run.
+- Low-read scheduler index tracks each active cycle's next due action so hourly processing loads only cycles that are actually due instead of scanning every stored cycle.
+- Run History and active-cycle dashboard use compact KVS indexes rather than repeatedly scanning retained audit/cycle records.
 - Final customer-facing message before the closing transition.
 - Final transition by **destination status name** rather than hard-coded transition IDs.
 - Optional resolution and additional transition-field values for final actions.
