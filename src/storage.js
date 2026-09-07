@@ -7,20 +7,9 @@ const ACCOUNT_PREFIX = 'account:';
 const SYSTEM_PREFIX = 'system:';
 const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
+const DUE_INDEX_KEY = `${SYSTEM_PREFIX}due-cycle-index`;
 const AUDIT_RETENTION_DAYS = 180;
 const RECENT_AUDIT_LIMIT = 100;
-
-const RECENT_FEED_TYPES = new Set([
-  'cycle-started',
-  'cycle-cancelled',
-  'participants-added',
-  'reminder-comment-sent',
-  'reminder-transitioned',
-  'reminder-completed',
-  'final-comment-sent',
-  'auto-transitioned',
-  'processing-error'
-]);
 
 async function queryByPrefix(prefix) {
   const results = [];
@@ -120,6 +109,44 @@ async function syncRuleAccountReferences(previousRule, nextRule) {
   }
 }
 
+function cycleRef(cycle) {
+  return {
+    issueId: cycle.issueId,
+    issueKey: cycle.issueKey,
+    ruleId: cycle.ruleId,
+    nextDueAt: cycle.nextDueAt ?? null,
+    paused: cycle.paused === true
+  };
+}
+
+async function readDueIndex() {
+  const stored = await kvs.get(DUE_INDEX_KEY);
+  return stored && typeof stored === 'object' ? stored : { refs: {}, migrated: false };
+}
+
+async function writeDueIndex(index) {
+  await kvs.set(DUE_INDEX_KEY, {
+    refs: index.refs ?? {},
+    migrated: index.migrated === true,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function upsertCycleRef(cycle) {
+  if (!cycle?.issueId) return;
+  const index = await readDueIndex();
+  index.refs ??= {};
+  index.refs[cycle.issueId] = cycleRef(cycle);
+  await writeDueIndex(index);
+}
+
+async function removeCycleRef(issueId) {
+  const index = await readDueIndex();
+  if (!index.refs?.[issueId]) return;
+  delete index.refs[issueId];
+  await writeDueIndex(index);
+}
+
 export async function getRules() {
   const results = await queryByPrefix(RULE_PREFIX);
   return results
@@ -148,10 +175,12 @@ export async function getCycle(issueId) {
 
 export async function saveCycle(cycle) {
   await kvs.set(`${CYCLE_PREFIX}${cycle.issueId}`, cycle);
+  await upsertCycleRef(cycle);
 }
 
-export async function deleteCycle(issueId) {
+export async function deleteCycle(issueId, knownCycle = null) {
   await kvs.delete(`${CYCLE_PREFIX}${issueId}`);
+  await removeCycleRef(knownCycle?.issueId ?? issueId);
 }
 
 export async function getActiveCycles() {
@@ -159,11 +188,54 @@ export async function getActiveCycles() {
   return results.map((item) => item.value).filter((cycle) => cycle.active);
 }
 
+export async function getCycleRefs() {
+  const index = await readDueIndex();
+  return Object.values(index.refs ?? {});
+}
+
+export async function getDueCycleRefs(now = new Date()) {
+  const cutoff = now.getTime();
+  const refs = await getCycleRefs();
+  return refs.filter((ref) => {
+    if (ref?.paused || !ref?.nextDueAt) return false;
+    const due = new Date(ref.nextDueAt).getTime();
+    return Number.isFinite(due) && due <= cutoff;
+  });
+}
+
+export async function dueIndexMigrated() {
+  const index = await readDueIndex();
+  return index.migrated === true;
+}
+
+export async function replaceDueIndex(cycles = []) {
+  const refs = {};
+  for (const cycle of cycles) {
+    if (cycle?.active && cycle?.issueId) refs[cycle.issueId] = cycleRef(cycle);
+  }
+  await writeDueIndex({ refs, migrated: true });
+}
+
 async function addRecentAudit(event) {
-  if (!RECENT_FEED_TYPES.has(event?.type)) return;
+  const important = new Set([
+    'cycle-started',
+    'cycle-cancelled',
+    'participants-added',
+    'reminder-comment-sent',
+    'reminder-transitioned',
+    'reminder-completed',
+    'final-comment-sent',
+    'auto-transitioned',
+    'processing-error',
+    'cycle-paused',
+    'cycle-resumed',
+    'cycle-restarted'
+  ]);
+  if (!important.has(event?.type)) return;
+
   const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
   const events = [event, ...(current?.events ?? [])]
-    .filter((item) => item?.timestamp && RECENT_FEED_TYPES.has(item.type))
+    .filter((item) => item?.timestamp)
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, RECENT_AUDIT_LIMIT);
   await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
@@ -188,12 +260,10 @@ export async function getAudit(issueId) {
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
-export async function getRecentAudit(limit = 100) {
-  const requested = Math.max(1, Math.min(Number(limit) || 100, RECENT_AUDIT_LIMIT));
+export async function getRecentAudit(limit = 250) {
+  const requested = Math.max(1, Math.min(Number(limit) || 250, RECENT_AUDIT_LIMIT));
   const recent = await kvs.get(RECENT_AUDIT_KEY);
-  if (Array.isArray(recent?.events)) {
-    return recent.events.filter((item) => RECENT_FEED_TYPES.has(item?.type)).slice(0, requested);
-  }
+  if (Array.isArray(recent?.events)) return recent.events.slice(0, requested);
   return [];
 }
 
