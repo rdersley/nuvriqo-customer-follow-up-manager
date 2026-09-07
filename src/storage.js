@@ -8,7 +8,19 @@ const SYSTEM_PREFIX = 'system:';
 const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const AUDIT_RETENTION_DAYS = 180;
-const RECENT_AUDIT_LIMIT = 500;
+const RECENT_AUDIT_LIMIT = 100;
+
+const RECENT_FEED_TYPES = new Set([
+  'cycle-started',
+  'cycle-cancelled',
+  'participants-added',
+  'reminder-comment-sent',
+  'reminder-transitioned',
+  'reminder-completed',
+  'final-comment-sent',
+  'auto-transitioned',
+  'processing-error'
+]);
 
 async function queryByPrefix(prefix) {
   const results = [];
@@ -148,11 +160,10 @@ export async function getActiveCycles() {
 }
 
 async function addRecentAudit(event) {
-  // Keep a compact dashboard feed so Run History is a single small KVS read
-  // instead of scanning every retained per-ticket audit record on each refresh.
+  if (!RECENT_FEED_TYPES.has(event?.type)) return;
   const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
   const events = [event, ...(current?.events ?? [])]
-    .filter((item) => item?.timestamp)
+    .filter((item) => item?.timestamp && RECENT_FEED_TYPES.has(item.type))
     .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
     .slice(0, RECENT_AUDIT_LIMIT);
   await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
@@ -177,21 +188,13 @@ export async function getAudit(issueId) {
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
-export async function getRecentAudit(limit = 250) {
-  const requested = Math.max(1, Math.min(Number(limit) || 250, RECENT_AUDIT_LIMIT));
+export async function getRecentAudit(limit = 100) {
+  const requested = Math.max(1, Math.min(Number(limit) || 100, RECENT_AUDIT_LIMIT));
   const recent = await kvs.get(RECENT_AUDIT_KEY);
-  if (Array.isArray(recent?.events)) return recent.events.slice(0, requested);
-
-  // One-time compatibility bootstrap for installations created before the
-  // compact recent-audit feed existed. Subsequent dashboard loads use one read.
-  const results = await queryByPrefix(AUDIT_PREFIX);
-  const events = results
-    .map((item) => item.value)
-    .filter((item) => item?.timestamp)
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .slice(0, RECENT_AUDIT_LIMIT);
-  await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
-  return events.slice(0, requested);
+  if (Array.isArray(recent?.events)) {
+    return recent.events.filter((item) => RECENT_FEED_TYPES.has(item?.type)).slice(0, requested);
+  }
+  return [];
 }
 
 export async function saveSchedulerStatus(status) {
