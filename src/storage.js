@@ -9,33 +9,29 @@ const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const DUE_INDEX_KEY = `${SYSTEM_PREFIX}due-cycle-index`;
 const AUDIT_RETENTION_DAYS = 180;
-const RECENT_AUDIT_LIMIT = 100;
+const RECENT_AUDIT_LIMIT = 50;
+const SUPPRESSED_AUDIT_TYPES = new Set([
+  'participants-added',
+  'reminder-comment-sent',
+  'reminder-transitioned',
+  'final-comment-sent'
+]);
 
 async function queryByPrefix(prefix) {
   const results = [];
   let cursor;
-
   do {
-    let query = kvs
-      .query()
-      .where('key', WhereConditions.beginsWith(prefix))
-      .limit(100);
+    let query = kvs.query().where('key', WhereConditions.beginsWith(prefix)).limit(100);
     if (cursor) query = query.cursor(cursor);
-
     const page = await query.getMany();
     results.push(...(page.results ?? []));
     cursor = page.nextCursor;
   } while (cursor);
-
   return results;
 }
 
 function participantIdsForRule(rule) {
-  return new Set(
-    (rule?.reminders ?? [])
-      .flatMap((reminder) => reminder?.participantAccountIds ?? [])
-      .filter(Boolean)
-  );
+  return new Set((rule?.reminders ?? []).flatMap((reminder) => reminder?.participantAccountIds ?? []).filter(Boolean));
 }
 
 function normaliseStoredRule(rule) {
@@ -44,28 +40,14 @@ function normaliseStoredRule(rule) {
   next.priority ??= 100;
   next.enabled ??= true;
   next.timingUnit ??= 'days';
-  next.conditions = Array.isArray(next.conditions)
-    ? next.conditions
-    : next.condition?.fieldId
-      ? [next.condition]
-      : [];
+  next.conditions = Array.isArray(next.conditions) ? next.conditions : next.condition?.fieldId ? [next.condition] : [];
   delete next.condition;
-
   next.reminders = (next.reminders ?? []).map((reminder) => {
-    const clean = {
-      ...reminder,
-      destinationStatusName: reminder?.destinationStatusName ?? '',
-      participantAccountIds: [...new Set(reminder?.participantAccountIds ?? [])]
-    };
+    const clean = { ...reminder, destinationStatusName: reminder?.destinationStatusName ?? '', participantAccountIds: [...new Set(reminder?.participantAccountIds ?? [])] };
     delete clean.participants;
     return clean;
   });
-
-  next.finalAction = {
-    resolutionId: '',
-    fields: {},
-    ...(next.finalAction ?? {})
-  };
+  next.finalAction = { resolutionId: '', fields: {}, ...(next.finalAction ?? {}) };
   return next;
 }
 
@@ -74,24 +56,15 @@ async function addAccountRuleReference(accountId, ruleId) {
   const current = await kvs.get(key);
   const ruleIds = new Set(current?.ruleIds ?? []);
   ruleIds.add(ruleId);
-  await kvs.set(key, {
-    accountId,
-    ruleIds: [...ruleIds],
-    updatedAt: current?.updatedAt ?? new Date().toISOString()
-  });
+  await kvs.set(key, { accountId, ruleIds: [...ruleIds], updatedAt: current?.updatedAt ?? new Date().toISOString() });
 }
 
 async function removeAccountRuleReference(accountId, ruleId) {
   const key = `${ACCOUNT_PREFIX}${accountId}`;
   const current = await kvs.get(key);
   if (!current) return;
-
   const ruleIds = (current.ruleIds ?? []).filter((id) => id !== ruleId);
-  if (ruleIds.length === 0) {
-    await kvs.delete(key);
-    return;
-  }
-
+  if (ruleIds.length === 0) { await kvs.delete(key); return; }
   await kvs.set(key, { ...current, ruleIds });
 }
 
@@ -100,25 +73,12 @@ async function syncRuleAccountReferences(previousRule, nextRule) {
   const next = participantIdsForRule(nextRule);
   const ruleId = nextRule?.id ?? previousRule?.id;
   if (!ruleId) return;
-
-  for (const accountId of next) {
-    if (!previous.has(accountId)) await addAccountRuleReference(accountId, ruleId);
-  }
-  for (const accountId of previous) {
-    if (!next.has(accountId)) await removeAccountRuleReference(accountId, ruleId);
-  }
+  for (const accountId of next) if (!previous.has(accountId)) await addAccountRuleReference(accountId, ruleId);
+  for (const accountId of previous) if (!next.has(accountId)) await removeAccountRuleReference(accountId, ruleId);
 }
 
 function cycleRef(cycle) {
-  return {
-    issueId: cycle.issueId,
-    issueKey: cycle.issueKey,
-    ruleId: cycle.ruleId,
-    startedAt: cycle.startedAt ?? null,
-    nextDueAt: cycle.nextDueAt ?? null,
-    paused: cycle.paused === true,
-    active: cycle.active !== false
-  };
+  return { issueId: cycle.issueId, issueKey: cycle.issueKey, ruleId: cycle.ruleId, startedAt: cycle.startedAt ?? null, nextDueAt: cycle.nextDueAt ?? null, paused: cycle.paused === true, active: cycle.active !== false };
 }
 
 async function readDueIndex() {
@@ -127,11 +87,7 @@ async function readDueIndex() {
 }
 
 async function writeDueIndex(index) {
-  await kvs.set(DUE_INDEX_KEY, {
-    refs: index.refs ?? {},
-    migrated: index.migrated === true,
-    updatedAt: new Date().toISOString()
-  });
+  await kvs.set(DUE_INDEX_KEY, { refs: index.refs ?? {}, migrated: index.migrated === true, updatedAt: new Date().toISOString() });
 }
 
 async function upsertCycleRef(cycle) {
@@ -151,9 +107,7 @@ async function removeCycleRef(issueId) {
 
 export async function getRules() {
   const results = await queryByPrefix(RULE_PREFIX);
-  return results
-    .map((item) => normaliseStoredRule(item.value))
-    .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
+  return results.map((item) => normaliseStoredRule(item.value)).sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
 }
 
 export async function saveRule(rule) {
@@ -171,23 +125,16 @@ export async function deleteRule(ruleId) {
   await kvs.delete(key);
 }
 
-export async function getCycle(issueId) {
-  return kvs.get(`${CYCLE_PREFIX}${issueId}`);
-}
+export async function getCycle(issueId) { return kvs.get(`${CYCLE_PREFIX}${issueId}`); }
 
 export async function saveCycle(cycle) {
-  const indexChanged =
-    cycle?._indexedDueAt !== (cycle?.nextDueAt ?? null) ||
-    cycle?._indexedPaused !== (cycle?.paused === true) ||
-    cycle?._indexedRuleId !== cycle?.ruleId;
-
+  const indexChanged = cycle?._indexedDueAt !== (cycle?.nextDueAt ?? null) || cycle?._indexedPaused !== (cycle?.paused === true) || cycle?._indexedRuleId !== cycle?.ruleId;
   if (indexChanged) {
     await upsertCycleRef(cycle);
     cycle._indexedDueAt = cycle.nextDueAt ?? null;
     cycle._indexedPaused = cycle.paused === true;
     cycle._indexedRuleId = cycle.ruleId;
   }
-
   await kvs.set(`${CYCLE_PREFIX}${cycle.issueId}`, cycle);
 }
 
@@ -198,9 +145,7 @@ export async function deleteCycle(issueId, knownCycle = null) {
 
 export async function getActiveCycles() {
   const index = await readDueIndex();
-  if (index.migrated === true) {
-    return Object.values(index.refs ?? {}).filter((cycle) => cycle.active !== false);
-  }
+  if (index.migrated === true) return Object.values(index.refs ?? {}).filter((cycle) => cycle.active !== false);
   const results = await queryByPrefix(CYCLE_PREFIX);
   return results.map((item) => item.value).filter((cycle) => cycle.active);
 }
@@ -220,61 +165,42 @@ export async function getDueCycleRefs(now = new Date()) {
   });
 }
 
-export async function dueIndexMigrated() {
-  const index = await readDueIndex();
-  return index.migrated === true;
-}
+export async function dueIndexMigrated() { const index = await readDueIndex(); return index.migrated === true; }
 
 export async function replaceDueIndex(cycles = []) {
   const refs = {};
-  for (const cycle of cycles) {
-    if (cycle?.active && cycle?.issueId) refs[cycle.issueId] = cycleRef(cycle);
-  }
+  for (const cycle of cycles) if (cycle?.active && cycle?.issueId) refs[cycle.issueId] = cycleRef(cycle);
   await writeDueIndex({ refs, migrated: true });
 }
 
-async function addRecentAudit(event) {
-  const important = new Set([
-    'cycle-started',
-    'cycle-cancelled',
-    'participants-added',
-    'reminder-comment-sent',
-    'reminder-transitioned',
-    'reminder-completed',
-    'final-comment-sent',
-    'auto-transitioned',
-    'processing-error',
-    'cycle-paused',
-    'cycle-resumed',
-    'cycle-restarted'
-  ]);
-  if (!important.has(event?.type)) return;
+function compactAuditEvent(event) {
+  const keys = ['issueId','issueKey','timestamp','type','ruleId','ruleName','reason','action','filtersMatched','selected','reminderIndex','destinationStatusName','resolutionId','resolutionName','commentSent','finalCommentSent','statusChanged','participantCount','after','timingUnit','source'];
+  return Object.fromEntries(keys.filter((key) => event?.[key] !== undefined && event?.[key] !== null && event?.[key] !== '').map((key) => [key, event[key]]));
+}
 
+async function addRecentAudit(event) {
+  const important = new Set(['cycle-started','cycle-cancelled','reminder-completed','auto-transitioned','processing-error','cycle-paused','cycle-resumed','cycle-restarted','rule-check']);
+  if (!important.has(event?.type)) return;
   const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
-  const events = [event, ...(current?.events ?? [])]
-    .filter((item) => item?.timestamp)
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-    .slice(0, RECENT_AUDIT_LIMIT);
+  const events = [compactAuditEvent(event), ...(current?.events ?? [])].filter((item) => item?.timestamp).sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, RECENT_AUDIT_LIMIT);
   await kvs.set(RECENT_AUDIT_KEY, { events, updatedAt: new Date().toISOString() });
 }
 
 export async function appendAudit(issueId, type, details = {}) {
+  // Intermediate action steps are already persisted in cycle progress for retry safety.
+  // Writing separate audit rows for each step multiplied KVS writes without adding useful
+  // Run History evidence; the aggregate reminder/final events contain the same outcome.
+  if (SUPPRESSED_AUDIT_TYPES.has(type)) return;
   const timestamp = new Date().toISOString();
   const event = { issueId, timestamp, type, ...details };
   const key = `${AUDIT_PREFIX}${issueId}:${timestamp}:${Math.random().toString(36).slice(2, 8)}`;
-  await kvs.set(
-    key,
-    event,
-    { ttl: { unit: 'DAYS', value: AUDIT_RETENTION_DAYS } }
-  );
+  await kvs.set(key, event, { ttl: { unit: 'DAYS', value: AUDIT_RETENTION_DAYS } });
   await addRecentAudit(event);
 }
 
 export async function getAudit(issueId) {
   const results = await queryByPrefix(`${AUDIT_PREFIX}${issueId}:`);
-  return results
-    .map((item) => item.value)
-    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return results.map((item) => item.value).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 }
 
 export async function getRecentAudit(limit = 250) {
@@ -284,16 +210,8 @@ export async function getRecentAudit(limit = 250) {
   return [];
 }
 
-export async function saveSchedulerStatus(status) {
-  await kvs.set(SCHEDULER_STATUS_KEY, {
-    ...status,
-    updatedAt: new Date().toISOString()
-  });
-}
-
-export async function getSchedulerStatus() {
-  return kvs.get(SCHEDULER_STATUS_KEY);
-}
+export async function saveSchedulerStatus(status) { await kvs.set(SCHEDULER_STATUS_KEY, { ...status, updatedAt: new Date().toISOString() }); }
+export async function getSchedulerStatus() { return kvs.get(SCHEDULER_STATUS_KEY); }
 
 export async function getPersonalDataAccounts() {
   const results = await queryByPrefix(ACCOUNT_PREFIX);
@@ -316,10 +234,7 @@ export async function erasePersonalDataForAccount(accountId) {
       if (ids.length !== (reminder.participantAccountIds ?? []).length) changed = true;
       return { ...reminder, participantAccountIds: ids };
     });
-
-    if (changed) {
-      await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule({ ...rule, reminders }));
-    }
+    if (changed) await kvs.set(`${RULE_PREFIX}${rule.id}`, normaliseStoredRule({ ...rule, reminders }));
   }
   await kvs.delete(`${ACCOUNT_PREFIX}${accountId}`);
 }
