@@ -9,8 +9,9 @@ const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const DUE_INDEX_KEY = `${SYSTEM_PREFIX}due-cycle-index`;
 const AUDIT_RETENTION_DAYS = 180;
-const RECENT_AUDIT_LIMIT = 50;
+const RECENT_AUDIT_LIMIT = 25;
 const SUPPRESSED_AUDIT_TYPES = new Set([
+  'rule-check',
   'participants-added',
   'reminder-comment-sent',
   'reminder-transitioned',
@@ -179,7 +180,7 @@ function compactAuditEvent(event) {
 }
 
 async function addRecentAudit(event) {
-  const important = new Set(['cycle-started','cycle-cancelled','reminder-completed','auto-transitioned','processing-error','cycle-paused','cycle-resumed','cycle-restarted','rule-check']);
+  const important = new Set(['cycle-started','cycle-cancelled','reminder-completed','auto-transitioned','processing-error','cycle-paused','cycle-resumed','cycle-restarted']);
   if (!important.has(event?.type)) return;
   const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
   const events = [compactAuditEvent(event), ...(current?.events ?? [])].filter((item) => item?.timestamp).sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, RECENT_AUDIT_LIMIT);
@@ -187,9 +188,10 @@ async function addRecentAudit(event) {
 }
 
 export async function appendAudit(issueId, type, details = {}) {
-  // Intermediate action steps are already persisted in cycle progress for retry safety.
-  // Writing separate audit rows for each step multiplied KVS writes without adding useful
-  // Run History evidence; the aggregate reminder/final events contain the same outcome.
+  // Routine rule checks and intermediate action steps are intentionally not persisted.
+  // The scheduler heartbeat carries aggregate checked counts, while cycle-started,
+  // reminder-completed, cancellation, closure and error events preserve actionable evidence.
+  // This prevents hourly backlog discovery from creating a write for every non-matching ticket.
   if (SUPPRESSED_AUDIT_TYPES.has(type)) return;
   const timestamp = new Date().toISOString();
   const event = { issueId, timestamp, type, ...details };
