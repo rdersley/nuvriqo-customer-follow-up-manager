@@ -24,11 +24,11 @@ Forge app for Jira Service Management that manages configurable customer follow-
 - Restart a fresh cycle when the ticket becomes eligible again.
 - Agent issue panel with pause, resume, restart and cancel controls.
 - Paused time is excluded from reminder/auto-close timing.
-- Project-level Run History with ticket check, filter match, action evidence and failures.
-- Audit evidence for customer comments, participant additions, reminder status changes, final comments, final status transitions and resolutions.
+- Project-level Run History focused on meaningful follow-up lifecycle actions and failures.
+- Consolidated audit evidence for reminder completion, customer comments, participant additions, status changes and final closure while suppressing routine no-action checks to minimise Forge storage usage.
 - Click-through ticket keys for direct Jira verification.
 - Scheduler heartbeat and current active-follow-up visibility.
-- Forge KVS storage for rules, active cycles and audit records.
+- Forge KVS storage for rules, active cycles and compact audit records.
 - Project settings UI that discovers Jira fields, fixed option values and statuses.
 - Paid-app licensing support for Marketplace distribution.
 
@@ -103,3 +103,7 @@ For later deployments, the root `npm run deploy` command builds both Custom UI a
 ```
 
 At runtime, the processor reads the transitions currently available on the issue and uses the transition whose destination status matches the configured destination status.
+
+## Marketplace release
+
+V1 has completed worksite acceptance and storage-efficiency hardening. This commit promotes the accepted V1 code to Forge production for Atlassian Marketplace submission.
