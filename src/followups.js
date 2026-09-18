@@ -144,6 +144,24 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
   return progress;
 }
 
+export function isEmptyJiraFieldValue(value) {
+  if (value == null || value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') {
+    if (Object.keys(value).length === 0) return true;
+    if ('value' in value) return value.value == null || value.value === '';
+  }
+  return false;
+}
+
+export function transitionFieldsForIssue(rule, issue) {
+  const configured = rule?.finalAction?.fields ?? {};
+  const modes = rule?.finalAction?.fieldUpdateModes ?? {};
+  return Object.fromEntries(Object.entries(configured).filter(([fieldId]) =>
+    modes[fieldId] !== 'ifEmpty' || isEmptyJiraFieldValue(issue?.fields?.[fieldId])
+  ));
+}
+
 export async function processCycle(cycle, rule, now = new Date()) {
   if (cycle.paused) return { action: 'paused' };
   const issue = await getIssue(cycle.issueKey);
@@ -199,7 +217,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
     const transitionFields = {};
     if (rule.finalAction.resolutionId) transitionFields.resolution = { id: rule.finalAction.resolutionId };
     else if (rule.finalAction.resolutionName) transitionFields.resolution = { name: rule.finalAction.resolutionName };
-    Object.assign(transitionFields, rule.finalAction.fields ?? {});
+    Object.assign(transitionFields, transitionFieldsForIssue(rule, issue));
     const transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields);
     await deleteCycle(cycle.issueId, cycle);
     await appendAudit(cycle.issueId, 'auto-transitioned', {
