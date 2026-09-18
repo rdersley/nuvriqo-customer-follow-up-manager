@@ -122,7 +122,9 @@ export async function transitionToStatus(issueKey, destinationStatusName, fields
 
   if (!transition) {
     const available = transitions.map((item) => item?.to?.name).filter(Boolean).join(', ');
-    throw new Error(`No available transition to "${destinationStatusName}" for ${issueKey}. Available destinations: ${available || 'none'}`);
+    const error = new Error(`No available transition to "${destinationStatusName}" for ${issueKey}. Available destinations: ${available || 'none'}`);
+    error.transitionDiagnostics = { stage: 'transition-selection', destinationStatusName, availableDestinations: transitions.map((item) => item?.to?.name).filter(Boolean) };
+    throw error;
   }
 
   const cleanFields = Object.fromEntries(
@@ -134,9 +136,11 @@ export async function transitionToStatus(issueKey, destinationStatusName, fields
     .map(([fieldId, metadata]) => metadata?.name || fieldId);
 
   if (missingRequired.length) {
-    throw new Error(
+    const error = new Error(
       `Transition to "${destinationStatusName}" for ${issueKey} requires additional field${missingRequired.length === 1 ? '' : 's'}: ${missingRequired.join(', ')}`
     );
+    error.transitionDiagnostics = { stage: 'required-fields', destinationStatusName, transitionId: transition.id, transitionName: transition.name, missingRequiredFields: missingRequired };
+    throw error;
   }
 
   const payload = { transition: { id: transition.id } };
@@ -147,6 +151,18 @@ export async function transitionToStatus(issueKey, destinationStatusName, fields
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  await jsonOrThrow(response, `Transition ${issueKey} to ${destinationStatusName}`);
+  if (!response.ok) {
+    const body = await response.text();
+    const error = new Error(`Transition ${issueKey} to "${destinationStatusName}" failed (${response.status}): ${body}`);
+    error.transitionDiagnostics = {
+      stage: 'jira-transition-request',
+      destinationStatusName,
+      transitionId: transition.id,
+      transitionName: transition.name,
+      httpStatus: response.status,
+      configuredFieldIds: Object.keys(cleanFields)
+    };
+    throw error;
+  }
   return transition;
 }

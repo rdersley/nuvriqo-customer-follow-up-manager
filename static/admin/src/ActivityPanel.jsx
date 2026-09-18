@@ -31,7 +31,16 @@ function rowForActivity(item) {
   if (item.type === 'reminder-completed') return { ...item, filters: 'Matched', actionText: actionSummary(item), tone: 'action' };
   if (item.type === 'auto-transitioned') return { ...item, filters: 'Matched', actionText: actionSummary(item), tone: 'action' };
   if (item.type === 'cycle-cancelled') return { ...item, filters: item.filtersMatched === false ? 'Not matched' : '—', actionText: `Follow-up cancelled${item.reason ? ` — ${item.reason}` : ''}`, tone: 'neutral' };
-  if (item.type === 'processing-error') return { ...item, filters: '—', actionText: item.message || 'Processing failed', tone: 'error' };
+  if (item.type === 'processing-error') {
+    const detail = item.message || 'Processing failed';
+    const context = [
+      item.currentStatusName && `From: ${item.currentStatusName}`,
+      item.destinationStatusName && `To: ${item.destinationStatusName}`,
+      item.missingRequiredFields?.length && `Missing: ${item.missingRequiredFields.join(', ')}`,
+      item.httpStatus && `Jira HTTP ${item.httpStatus}`
+    ].filter(Boolean).join(' · ');
+    return { ...item, filters: '—', actionText: context ? `${detail} — ${context}` : detail, tone: 'error' };
+  }
   return null;
 }
 
