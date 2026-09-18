@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { transitionFieldsForIssue, isEmptyJiraFieldValue } from '../src/followups.js';
 import {
   conditionsMatchIssue,
   cycleStillMatchesRule,
@@ -140,4 +141,28 @@ test('template rendering supplies customer and issue variables', () => {
     context
   );
   assert.equal(result, 'Hi Jane, DEMO-1 has waited 72 hours.');
+});
+
+
+test('advanced transition fields can preserve existing Jira values', () => {
+  const rule = { finalAction: {
+    fields: { customfield_1: 'new base', customfield_2: 'new crew', customfield_3: 'always' },
+    fieldUpdateModes: { customfield_1: 'ifEmpty', customfield_2: 'ifEmpty', customfield_3: 'always' }
+  }};
+  const issue = { fields: { customfield_1: 'Existing base', customfield_2: '', customfield_3: 'old' } };
+  assert.deepEqual(transitionFieldsForIssue(rule, issue), {
+    customfield_2: 'new crew',
+    customfield_3: 'always'
+  });
+});
+
+test('empty Jira field detection handles scalar, array and option values', () => {
+  assert.equal(isEmptyJiraFieldValue(null), true);
+  assert.equal(isEmptyJiraFieldValue(''), true);
+  assert.equal(isEmptyJiraFieldValue([]), true);
+  assert.equal(isEmptyJiraFieldValue({}), true);
+  assert.equal(isEmptyJiraFieldValue({ value: '' }), true);
+  assert.equal(isEmptyJiraFieldValue('existing'), false);
+  assert.equal(isEmptyJiraFieldValue(['existing']), false);
+  assert.equal(isEmptyJiraFieldValue({ value: 'existing' }), false);
 });
