@@ -67,6 +67,29 @@ function isConcreteAction(item) {
   return false;
 }
 
+function ErrorDetails({ item }) {
+  const details = [
+    ['Reason', item.message || 'Jira rejected the follow-up action.'],
+    ['Current status', item.currentStatusName],
+    ['Target status', item.destinationStatusName],
+    ['Failure stage', item.failureStage],
+    ['Transition', [item.transitionName, item.transitionId && `ID ${item.transitionId}`].filter(Boolean).join(' · ')],
+    ['Missing required fields', item.missingRequiredFields?.join(', ')],
+    ['Available destinations', item.availableDestinations?.join(', ')],
+    ['Jira response', item.httpStatus && `HTTP ${item.httpStatus}`],
+    ['Configured field IDs', item.configuredFieldIds?.join(', ')]
+  ].filter(([, value]) => value);
+
+  return <details style={{ minWidth: 360 }}>
+    <summary style={{ cursor: 'pointer', fontWeight: 700, color: '#ae2a19' }}>
+      {item.message && item.message !== 'Processing failed' ? item.message : `Transition failed → ${item.destinationStatusName || 'final status'}`} — view details
+    </summary>
+    <div style={{ marginTop: 8, padding: 10, border: '1px solid #f1c6c0', borderRadius: 6, background: '#fff7f5' }}>
+      {details.map(([label, value]) => <div key={label} style={{ marginBottom: 5 }}><strong>{label}:</strong> {value}</div>)}
+    </div>
+  </details>;
+}
+
 function TicketLink({ issueKey }) {
   if (!issueKey) return <>—</>;
   return <button type="button" onClick={() => router.open(`/browse/${issueKey}`)} title={`Open ${issueKey} in Jira`} style={{ border: 0, background: 'transparent', padding: 0, color: '#0c66e4', fontWeight: 750, cursor: 'pointer' }}>{issueKey}</button>;
@@ -144,7 +167,7 @@ export default function ActivityPanel() {
       <div className="section-head"><div><h2>Run history</h2><p className="muted">Actions are shown first so you can quickly verify customer comments, status changes and follow-up lifecycle events. Use Checks when you need the detailed rule evaluation trail.</p></div><button onClick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button></div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, margin: '16px 0', flexWrap: 'wrap' }}><div className="activity-filters" style={{ margin: 0 }}>{filterOptions.map(([value,label]) => <button key={value} className={filter === value ? 'filter-active' : ''} onClick={() => setFilter(value)}>{label}</button>)}</div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find ticket, rule or action…" aria-label="Find ticket, rule or action" style={{ width: 300, maxWidth: '100%' }} /></div>
       {error && <div className="notice">{error}</div>}
-      {activity.length === 0 ? <div className="empty">No matching activity has been recorded yet.</div> : <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Result</th><th>Action taken</th></tr></thead><tbody>{activity.map((item,index) => <tr key={`${item.timestamp}-${item.issueId}-${item.type}-${index}`}><td>{formatDate(item.timestamp)}</td><td><TicketLink issueKey={item.issueKey || item.issueId} /></td><td>{item.ruleName || item.ruleId || '—'}</td><td><span className={`result-pill ${item.filters === 'Matched' ? 'result-success' : ''}`}>{item.filters}</span></td><td>{item.tone === 'error' ? <span className="result-pill result-error">{item.actionText}</span> : <strong style={isConcreteAction(item) ? { fontWeight: 700 } : { fontWeight: 500 }}>{item.actionText}</strong>}</td></tr>)}</tbody></table></div>}
+      {activity.length === 0 ? <div className="empty">No matching activity has been recorded yet.</div> : <div className="activity-table-wrap"><table className="activity-table"><thead><tr><th>Date / time</th><th>Ticket</th><th>Rule</th><th>Result</th><th>Action taken</th></tr></thead><tbody>{activity.map((item,index) => <tr key={`${item.timestamp}-${item.issueId}-${item.type}-${index}`}><td>{formatDate(item.timestamp)}</td><td><TicketLink issueKey={item.issueKey || item.issueId} /></td><td>{item.ruleName || item.ruleId || '—'}</td><td><span className={`result-pill ${item.filters === 'Matched' ? 'result-success' : ''}`}>{item.filters}</span></td><td>{item.tone === 'error' ? <ErrorDetails item={item} /> : <strong style={isConcreteAction(item) ? { fontWeight: 700 } : { fontWeight: 500 }}>{item.actionText}</strong>}</td></tr>)}</tbody></table></div>}
     </section>
 
     <section className="card"><h2>Active follow-ups</h2>{(data?.activeCycles ?? []).length === 0 ? <div className="empty">No active follow-up cycles in this project.</div> : <div className="rules">{data.activeCycles.map((cycle) => <div className="rule" key={cycle.issueId}><div><div className="rule-title"><TicketLink issueKey={cycle.issueKey} /></div><div className="muted">{cycle.ruleName} · started {formatDate(cycle.startedAt)}{cycle.paused ? ' · paused' : ''}</div></div>{cycle.lastError && <span className="result-pill result-error">Last run failed</span>}</div>)}</div>}</section>
