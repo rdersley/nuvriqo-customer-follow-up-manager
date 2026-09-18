@@ -1,3 +1,4 @@
+<!-- Development deployment trigger: enhanced transition diagnostics 2026-09-18 -->
 <!-- Development deployment trigger: conditional transition fields -->
 # Changelog
 
