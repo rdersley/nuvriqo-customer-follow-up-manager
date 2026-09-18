@@ -218,7 +218,18 @@ export async function processCycle(cycle, rule, now = new Date()) {
     if (rule.finalAction.resolutionId) transitionFields.resolution = { id: rule.finalAction.resolutionId };
     else if (rule.finalAction.resolutionName) transitionFields.resolution = { name: rule.finalAction.resolutionName };
     Object.assign(transitionFields, transitionFieldsForIssue(rule, issue));
-    const transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields);
+    let transition;
+    try {
+      transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields);
+    } catch (error) {
+      error.transitionDiagnostics = {
+        currentStatusName: issue?.fields?.status?.name ?? '',
+        destinationStatusName: rule.finalAction.destinationStatusName,
+        configuredFieldIds: Object.keys(transitionFields),
+        ...(error.transitionDiagnostics ?? {})
+      };
+      throw error;
+    }
     await deleteCycle(cycle.issueId, cycle);
     await appendAudit(cycle.issueId, 'auto-transitioned', {
       issueKey: cycle.issueKey,
