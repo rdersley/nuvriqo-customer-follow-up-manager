@@ -7,7 +7,7 @@ import './styles.css';
 const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
 
 const blankCondition = () => ({ fieldId: '', operator: 'equals', value: '' });
-const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '' });
+const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '', updateMode: 'always' });
 const blankReminder = (afterDays = 2) => ({
   afterDays,
   message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.',
@@ -42,11 +42,11 @@ const emptyRule = (projectKey = '') => ({
   }
 });
 
-function valueToEntry(fieldId, value) {
-  if (typeof value === 'number') return { fieldId, format: 'number', value: String(value) };
-  if (typeof value === 'boolean') return { fieldId, format: 'boolean', value: String(value) };
-  if (value !== null && typeof value === 'object') return { fieldId, format: 'json', value: JSON.stringify(value) };
-  return { fieldId, format: 'text', value: value == null ? '' : String(value) };
+function valueToEntry(fieldId, value, updateMode = 'always') {
+  if (typeof value === 'number') return { fieldId, updateMode, format: 'number', value: String(value) };
+  if (typeof value === 'boolean') return { fieldId, updateMode, format: 'boolean', value: String(value) };
+  if (value !== null && typeof value === 'object') return { fieldId, updateMode, format: 'json', value: JSON.stringify(value) };
+  return { fieldId, updateMode, format: 'text', value: value == null ? '' : String(value) };
 }
 
 function normaliseRule(rule) {
@@ -75,7 +75,7 @@ function normaliseRule(rule) {
   next.finalAction = { resolutionId: '', message: DEFAULT_FINAL_MESSAGE, fields: {}, ...(next.finalAction ?? {}) };
   next.finalAction.fieldEntries = Object.entries(next.finalAction.fields ?? {})
     .filter(([fieldId]) => fieldId !== 'resolution')
-    .map(([fieldId, value]) => valueToEntry(fieldId, value));
+    .map(([fieldId, value]) => valueToEntry(fieldId, value, next.finalAction.fieldUpdateModes?.[fieldId] ?? 'always'));
   return next;
 }
 
@@ -262,6 +262,13 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
         <option value="json">JSON / Jira object</option>
       </select>
     </label>
+    <label>Update behaviour
+      <select value={entry.updateMode ?? 'always'} onChange={(e) => onUpdate(index, 'updateMode', e.target.value)}>
+        <option value="always">Always set value</option>
+        <option value="ifEmpty">Only if field is empty</option>
+      </select>
+      <span className="hint-inline">{entry.updateMode === 'ifEmpty' ? 'Keeps the ticket’s existing value when the field already contains data.' : 'Replaces the field with the configured value during the final transition.'}</span>
+    </label>
     <label>Value
       {entry.format === 'boolean' ?
         <select value={entry.value ?? 'true'} onChange={(e) => onUpdate(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
@@ -436,6 +443,7 @@ function App() {
       delete clean.condition;
 
       const fields = {};
+      const fieldUpdateModes = {};
       for (const entry of clean.finalAction.fieldEntries ?? []) {
         if (!entry.fieldId) continue;
         if (entry.fieldId === 'resolution') {
@@ -445,8 +453,10 @@ function App() {
           throw new Error(`Enter a value for transition field ${entry.fieldId}.`);
         }
         fields[entry.fieldId] = parseTransitionField(entry);
+        fieldUpdateModes[entry.fieldId] = entry.updateMode === 'ifEmpty' ? 'ifEmpty' : 'always';
       }
       clean.finalAction.fields = fields;
+      clean.finalAction.fieldUpdateModes = fieldUpdateModes;
       delete clean.finalAction.fieldEntries;
 
       const result = await invoke('saveRule', { rule: clean });
