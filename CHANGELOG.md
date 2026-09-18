@@ -1,3 +1,4 @@
+<!-- Development deployment trigger: conditional transition fields -->
 # Changelog
 
 ## 0.9.1 — UI refresh — 5 September 2026
