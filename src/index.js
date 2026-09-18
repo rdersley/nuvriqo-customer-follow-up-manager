@@ -244,10 +244,21 @@ export async function processDueFollowUps(event, context) {
         };
         await saveCycle(cycle).catch(() => undefined);
 
+        const diagnostics = error?.transitionDiagnostics ?? {};
         await appendAudit(cycle.issueId, 'processing-error', {
           issueKey: cycle.issueKey,
           ruleId: cycle.ruleId,
-          message
+          ruleName: rule?.name,
+          message,
+          currentStatusName: diagnostics.currentStatusName,
+          destinationStatusName: diagnostics.destinationStatusName ?? rule?.finalAction?.destinationStatusName,
+          failureStage: diagnostics.stage,
+          transitionId: diagnostics.transitionId,
+          transitionName: diagnostics.transitionName,
+          httpStatus: diagnostics.httpStatus,
+          missingRequiredFields: diagnostics.missingRequiredFields,
+          availableDestinations: diagnostics.availableDestinations,
+          configuredFieldIds: diagnostics.configuredFieldIds
         }).catch(() => undefined);
       }
     }
