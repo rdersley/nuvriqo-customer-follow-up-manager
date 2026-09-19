@@ -11,6 +11,7 @@ import {
   getDueCycleRefs,
   getRules,
   replaceDueIndex,
+  recoverLegacyFailedCycles,
   saveCycle,
   saveSchedulerStatus
 } from './storage.js';
@@ -190,6 +191,8 @@ export async function processDueFollowUps(event, context) {
   try {
     const rules = await getRules();
     await ensureDueIndex(rules);
+    // One-time repair for cycles that failed before automatic retry scheduling existed.
+    await recoverLegacyFailedCycles(new Date().toISOString());
 
     const rulesById = new Map(rules.map((rule) => [rule.id, rule]));
     activeRefs = await getCycleRefs();

@@ -144,6 +144,25 @@ export async function deleteCycle(issueId, knownCycle = null) {
   await removeCycleRef(knownCycle?.issueId ?? issueId);
 }
 
+
+const FAILED_RETRY_RECOVERY_KEY = 'system:failed-retry-recovery-v1';
+
+export async function recoverLegacyFailedCycles(retryAt = new Date().toISOString()) {
+  if (await kvs.get(FAILED_RETRY_RECOVERY_KEY)) return 0;
+  const results = await queryByPrefix(CYCLE_PREFIX);
+  let recovered = 0;
+  for (const item of results) {
+    const cycle = item.value;
+    if (!cycle?.active || !cycle?.lastError) continue;
+    cycle.nextDueAt = retryAt;
+    cycle.lastError.retryAt = retryAt;
+    await saveCycle(cycle);
+    recovered += 1;
+  }
+  await kvs.set(FAILED_RETRY_RECOVERY_KEY, { completedAt: new Date().toISOString(), recovered });
+  return recovered;
+}
+
 export async function getActiveCycles() {
   const index = await readDueIndex();
   if (index.migrated === true) return Object.values(index.refs ?? {}).filter((cycle) => cycle.active !== false);
