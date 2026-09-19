@@ -1,3 +1,4 @@
+<!-- Development deployment trigger: conditional current-value transition fields 2026-09-19 -->
 <!-- Development deployment trigger: persist transition diagnostics 2026-09-19 -->
 <!-- Development deployment trigger: readable run-history diagnostics 2026-09-18 -->
 <!-- Development deployment trigger: enhanced transition diagnostics 2026-09-18 -->
