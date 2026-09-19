@@ -166,3 +166,21 @@ test('empty Jira field detection handles scalar, array and option values', () =>
   assert.equal(isEmptyJiraFieldValue(['existing']), false);
   assert.equal(isEmptyJiraFieldValue({ value: 'existing' }), false);
 });
+
+
+test('advanced transition fields can update when current value equals or contains configured text', () => {
+  const rule = { finalAction: {
+    fields: { customfield_1: 'Unknown', customfield_2: 'Unknown', customfield_3: 'Never' },
+    fieldUpdateModes: { customfield_1: 'ifEquals', customfield_2: 'ifContains', customfield_3: 'ifEquals' },
+    fieldMatchValues: { customfield_1: 'Please Update', customfield_2: 'please update', customfield_3: 'Please Update' }
+  }};
+  const issue = { fields: {
+    customfield_1: { value: 'Please Update' },
+    customfield_2: 'Needs PLEASE UPDATE before close',
+    customfield_3: 'DUB'
+  }};
+  assert.deepEqual(transitionFieldsForIssue(rule, issue), {
+    customfield_1: 'Unknown',
+    customfield_2: 'Unknown'
+  });
+});
