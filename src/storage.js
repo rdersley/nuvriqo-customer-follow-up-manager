@@ -175,7 +175,7 @@ export async function replaceDueIndex(cycles = []) {
 }
 
 function compactAuditEvent(event) {
-  const keys = ['issueId','issueKey','timestamp','type','ruleId','ruleName','reason','action','filtersMatched','selected','reminderIndex','destinationStatusName','resolutionId','resolutionName','commentSent','finalCommentSent','statusChanged','participantCount','after','timingUnit','source'];
+  const keys = ['issueId','issueKey','timestamp','type','ruleId','ruleName','reason','message','action','filtersMatched','selected','reminderIndex','currentStatusName','destinationStatusName','failureStage','transitionId','transitionName','httpStatus','missingRequiredFields','availableDestinations','configuredFieldIds','resolutionId','resolutionName','commentSent','finalCommentSent','statusChanged','participantCount','after','timingUnit','source'];
   return Object.fromEntries(keys.filter((key) => event?.[key] !== undefined && event?.[key] !== null && event?.[key] !== '').map((key) => [key, event[key]]));
 }
 
