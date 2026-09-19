@@ -247,7 +247,8 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
     return String(option.value) === String(entry.value ?? '');
   });
 
-  return <div className="condition-row">
+  return <div className="transition-field-card">
+    <div className="transition-field-grid">
     <label>Jira field
       <select value={entry.fieldId} onChange={(e) => selectField(e.target.value)}>
         <option value="">Choose field…</option>
@@ -271,10 +272,12 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
       </select>
       <span className="hint-inline">{entry.updateMode === 'ifEmpty' ? 'Sets the value only when the ticket field is empty.' : entry.updateMode === 'ifEquals' ? 'Sets the value only when the current ticket field exactly matches the value below.' : entry.updateMode === 'ifContains' ? 'Sets the value only when the current ticket field contains the text below.' : 'Replaces the field with the configured value during the final transition.'}</span>
     </label>
-    {(entry.updateMode === 'ifEquals' || entry.updateMode === 'ifContains') && <label>{entry.updateMode === 'ifEquals' ? 'Current value equals' : 'Current value contains'}
-      <input value={entry.matchValue ?? ''} onChange={(e) => onUpdate(index, 'matchValue', e.target.value)} placeholder={entry.updateMode === 'ifEquals' ? 'e.g. Please Update' : 'e.g. Please Update'} />
-    </label>}
-    <label>Value
+    </div>
+    {(entry.updateMode === 'ifEquals' || entry.updateMode === 'ifContains') && <div className="transition-match-row"><label>{entry.updateMode === 'ifEquals' ? 'Current value equals' : 'Current value contains'}
+      <input type="text" value={entry.matchValue ?? ''} onChange={(e) => onUpdate(index, 'matchValue', e.target.value)} placeholder="e.g. Please Update" autoComplete="off" />
+      <span className="hint-inline">Type the current Jira value that should trigger this update.</span>
+    </label></div>}
+    <div className="transition-value-row"><label>New value
       {entry.format === 'boolean' ?
         <select value={entry.value ?? 'true'} onChange={(e) => onUpdate(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
         loading ? <div className="loading-field">Loading Jira values…</div> :
@@ -289,7 +292,8 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
             <span className="hint-inline">No fixed values were returned. Enter the Jira transition value manually.</span>
           </>}
     </label>
-    <button className="icon-danger condition-remove" type="button" onClick={() => onRemove(index)} title="Remove transition field">×</button>
+    <button className="icon-danger transition-field-remove" type="button" onClick={() => onRemove(index)} title="Remove transition field">×</button>
+    </div>
   </div>;
 }
 
