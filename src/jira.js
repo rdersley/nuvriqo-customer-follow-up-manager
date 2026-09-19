@@ -114,7 +114,18 @@ export async function getTransitions(issueKey, includeFields = false) {
   return data?.transitions ?? [];
 }
 
-export async function transitionToStatus(issueKey, destinationStatusName, fields = {}) {
+function isBlankExistingField(value) {
+  if (value == null || value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') {
+    if (Object.keys(value).length === 0) return true;
+    if ('value' in value) return value.value == null || value.value === '';
+    if ('name' in value) return value.name == null || value.name === '';
+  }
+  return false;
+}
+
+export async function transitionToStatus(issueKey, destinationStatusName, fields = {}, existingFields = {}) {
   const transitions = await getTransitions(issueKey, true);
   const transition = transitions.find(
     (item) => String(item?.to?.name ?? '').toLowerCase() === String(destinationStatusName).toLowerCase()
@@ -132,7 +143,7 @@ export async function transitionToStatus(issueKey, destinationStatusName, fields
   );
 
   const missingRequired = Object.entries(transition.fields ?? {})
-    .filter(([fieldId, metadata]) => metadata?.required && !metadata?.hasDefaultValue && cleanFields[fieldId] == null)
+    .filter(([fieldId, metadata]) => metadata?.required && !metadata?.hasDefaultValue && cleanFields[fieldId] == null && isBlankExistingField(existingFields?.[fieldId]))
     .map(([fieldId, metadata]) => metadata?.name || fieldId);
 
   if (missingRequired.length) {

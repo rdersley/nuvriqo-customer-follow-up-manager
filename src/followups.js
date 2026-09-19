@@ -238,7 +238,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
     Object.assign(transitionFields, transitionFieldsForIssue(rule, issue));
     let transition;
     try {
-      transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields);
+      transition = await transitionToStatus(cycle.issueKey, rule.finalAction.destinationStatusName, transitionFields, issue?.fields ?? {});
     } catch (error) {
       error.transitionDiagnostics = {
         currentStatusName: issue?.fields?.status?.name ?? '',
