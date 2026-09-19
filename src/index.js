@@ -238,10 +238,15 @@ export async function processDueFollowUps(event, context) {
         const message = error?.message || String(error);
         console.error(`Failed processing ${cycle.issueKey}:`, error);
 
+        const retryAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
         cycle.lastError = {
           message,
-          occurredAt: new Date().toISOString()
+          occurredAt: new Date().toISOString(),
+          retryAt
         };
+        // A failed action must remain due. processCycle may have advanced nextDueAt
+        // before the Jira action threw, which otherwise strands the cycle forever.
+        cycle.nextDueAt = retryAt;
         await saveCycle(cycle).catch(() => undefined);
 
         const diagnostics = error?.transitionDiagnostics ?? {};
