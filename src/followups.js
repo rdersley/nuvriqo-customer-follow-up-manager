@@ -154,12 +154,30 @@ export function isEmptyJiraFieldValue(value) {
   return false;
 }
 
+function jiraFieldComparableText(value) {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map(jiraFieldComparableText).filter(Boolean).join(', ');
+  if (typeof value === 'object') {
+    if (value.value != null) return String(value.value);
+    if (value.name != null) return String(value.name);
+    if (value.displayName != null) return String(value.displayName);
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
 export function transitionFieldsForIssue(rule, issue) {
   const configured = rule?.finalAction?.fields ?? {};
   const modes = rule?.finalAction?.fieldUpdateModes ?? {};
-  return Object.fromEntries(Object.entries(configured).filter(([fieldId]) =>
-    modes[fieldId] !== 'ifEmpty' || isEmptyJiraFieldValue(issue?.fields?.[fieldId])
-  ));
+  const matches = rule?.finalAction?.fieldMatchValues ?? {};
+  return Object.fromEntries(Object.entries(configured).filter(([fieldId]) => {
+    const mode = modes[fieldId] ?? 'always';
+    const current = issue?.fields?.[fieldId];
+    if (mode === 'ifEmpty') return isEmptyJiraFieldValue(current);
+    if (mode === 'ifEquals') return jiraFieldComparableText(current).trim().toLocaleLowerCase() === String(matches[fieldId] ?? '').trim().toLocaleLowerCase();
+    if (mode === 'ifContains') return jiraFieldComparableText(current).toLocaleLowerCase().includes(String(matches[fieldId] ?? '').trim().toLocaleLowerCase());
+    return true;
+  }));
 }
 
 export async function processCycle(cycle, rule, now = new Date()) {
