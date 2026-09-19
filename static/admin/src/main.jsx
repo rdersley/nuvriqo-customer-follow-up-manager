@@ -7,7 +7,7 @@ import './styles.css';
 const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
 
 const blankCondition = () => ({ fieldId: '', operator: 'equals', value: '' });
-const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '', updateMode: 'always' });
+const blankTransitionField = () => ({ fieldId: '', format: 'text', value: '', updateMode: 'always', matchValue: '' });
 const blankReminder = (afterDays = 2) => ({
   afterDays,
   message: 'Hi {{customer.firstName}}, we are waiting for your response regarding {{issue.key}}.',
@@ -42,11 +42,11 @@ const emptyRule = (projectKey = '') => ({
   }
 });
 
-function valueToEntry(fieldId, value, updateMode = 'always') {
-  if (typeof value === 'number') return { fieldId, updateMode, format: 'number', value: String(value) };
-  if (typeof value === 'boolean') return { fieldId, updateMode, format: 'boolean', value: String(value) };
-  if (value !== null && typeof value === 'object') return { fieldId, updateMode, format: 'json', value: JSON.stringify(value) };
-  return { fieldId, updateMode, format: 'text', value: value == null ? '' : String(value) };
+function valueToEntry(fieldId, value, updateMode = 'always', matchValue = '') {
+  if (typeof value === 'number') return { fieldId, updateMode, matchValue, format: 'number', value: String(value) };
+  if (typeof value === 'boolean') return { fieldId, updateMode, matchValue, format: 'boolean', value: String(value) };
+  if (value !== null && typeof value === 'object') return { fieldId, updateMode, matchValue, format: 'json', value: JSON.stringify(value) };
+  return { fieldId, updateMode, matchValue, format: 'text', value: value == null ? '' : String(value) };
 }
 
 function normaliseRule(rule) {
@@ -75,7 +75,7 @@ function normaliseRule(rule) {
   next.finalAction = { resolutionId: '', message: DEFAULT_FINAL_MESSAGE, fields: {}, ...(next.finalAction ?? {}) };
   next.finalAction.fieldEntries = Object.entries(next.finalAction.fields ?? {})
     .filter(([fieldId]) => fieldId !== 'resolution')
-    .map(([fieldId, value]) => valueToEntry(fieldId, value, next.finalAction.fieldUpdateModes?.[fieldId] ?? 'always'));
+    .map(([fieldId, value]) => valueToEntry(fieldId, value, next.finalAction.fieldUpdateModes?.[fieldId] ?? 'always', next.finalAction.fieldMatchValues?.[fieldId] ?? ''));
   return next;
 }
 
@@ -266,9 +266,14 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
       <select value={entry.updateMode ?? 'always'} onChange={(e) => onUpdate(index, 'updateMode', e.target.value)}>
         <option value="always">Always set value</option>
         <option value="ifEmpty">Only if field is empty</option>
+        <option value="ifEquals">Only if field equals value</option>
+        <option value="ifContains">Only if field contains text</option>
       </select>
-      <span className="hint-inline">{entry.updateMode === 'ifEmpty' ? 'Keeps the ticket’s existing value when the field already contains data.' : 'Replaces the field with the configured value during the final transition.'}</span>
+      <span className="hint-inline">{entry.updateMode === 'ifEmpty' ? 'Sets the value only when the ticket field is empty.' : entry.updateMode === 'ifEquals' ? 'Sets the value only when the current ticket field exactly matches the value below.' : entry.updateMode === 'ifContains' ? 'Sets the value only when the current ticket field contains the text below.' : 'Replaces the field with the configured value during the final transition.'}</span>
     </label>
+    {(entry.updateMode === 'ifEquals' || entry.updateMode === 'ifContains') && <label>{entry.updateMode === 'ifEquals' ? 'Current value equals' : 'Current value contains'}
+      <input value={entry.matchValue ?? ''} onChange={(e) => onUpdate(index, 'matchValue', e.target.value)} placeholder={entry.updateMode === 'ifEquals' ? 'e.g. Please Update' : 'e.g. Please Update'} />
+    </label>}
     <label>Value
       {entry.format === 'boolean' ?
         <select value={entry.value ?? 'true'} onChange={(e) => onUpdate(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
@@ -444,6 +449,7 @@ function App() {
 
       const fields = {};
       const fieldUpdateModes = {};
+      const fieldMatchValues = {};
       for (const entry of clean.finalAction.fieldEntries ?? []) {
         if (!entry.fieldId) continue;
         if (entry.fieldId === 'resolution') {
@@ -453,10 +459,15 @@ function App() {
           throw new Error(`Enter a value for transition field ${entry.fieldId}.`);
         }
         fields[entry.fieldId] = parseTransitionField(entry);
-        fieldUpdateModes[entry.fieldId] = entry.updateMode === 'ifEmpty' ? 'ifEmpty' : 'always';
+        fieldUpdateModes[entry.fieldId] = ['ifEmpty','ifEquals','ifContains'].includes(entry.updateMode) ? entry.updateMode : 'always';
+        if (['ifEquals','ifContains'].includes(entry.updateMode)) {
+          if (!String(entry.matchValue ?? '').trim()) throw new Error(`Enter the current value to match for transition field ${entry.fieldId}.`);
+          fieldMatchValues[entry.fieldId] = String(entry.matchValue).trim();
+        }
       }
       clean.finalAction.fields = fields;
       clean.finalAction.fieldUpdateModes = fieldUpdateModes;
+      clean.finalAction.fieldMatchValues = fieldMatchValues;
       delete clean.finalAction.fieldEntries;
 
       const result = await invoke('saveRule', { rule: clean });
