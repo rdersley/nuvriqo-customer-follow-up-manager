@@ -235,6 +235,8 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
     onUpdate(index, 'value', encoded.value);
   }
 
+  const fieldHasFixedValues = field?.schemaType === 'option' || ['select','multiselect','checkboxes','radiobuttons'].some((type) => String(field?.schemaCustom ?? '').toLowerCase().includes(type));
+
   const selectedOption = options.find((option) => {
     if (entry.format === 'json') {
       try {
@@ -281,7 +283,7 @@ function TransitionFieldRow({ entry, index, fields, onUpdate, onRemove }) {
       {entry.format === 'boolean' ?
         <select value={entry.value ?? 'true'} onChange={(e) => onUpdate(index, 'value', e.target.value)}><option value="true">True</option><option value="false">False</option></select> :
         loading ? <div className="loading-field">Loading Jira values…</div> :
-          options.length ? <>
+          fieldHasFixedValues && options.length ? <>
             <select value={selectedOption?.value ?? ''} onChange={(e) => selectOption(e.target.value)}>
               <option value="">Choose value…</option>
               {options.map((item) => <option key={`${item.value}-${item.displayName}`} value={item.value}>{item.displayName}</option>)}
