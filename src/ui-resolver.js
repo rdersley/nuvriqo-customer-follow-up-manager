@@ -14,6 +14,7 @@ import {
   saveCycle,
   saveRule
 } from './storage.js';
+import { resolverLicenseAllows } from './license.js';
 import { validateRule } from './rules.js';
 
 const resolver = new Resolver();
@@ -33,8 +34,9 @@ function issueKeyFromContext(context) {
   return context?.extension?.issue?.key ?? context?.issue?.key ?? null;
 }
 
+// Fails closed in production when the licence is missing or inactive.
 function licenseAllows(context) {
-  return context?.license == null || context.license.active === true;
+  return resolverLicenseAllows(context);
 }
 
 function ensureLicensedForWrite(context) {

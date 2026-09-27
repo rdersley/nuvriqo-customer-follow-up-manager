@@ -38,7 +38,7 @@ Give hardware tickets a longer sequence with more reminders before closure while
 
 Create a rule such as:
 
-`SD Client = RYR - Ryanair` AND `Ticket Type = Hardware`
+`SD Client = ACME - Acme Corp` AND `Ticket Type = Hardware`
 
 and configure a different rule for another client or ticket type in the same JSM project.
 
