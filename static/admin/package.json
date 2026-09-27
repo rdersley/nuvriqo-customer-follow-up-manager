@@ -3,9 +3,13 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "scripts": { "build": "vite build" },
+  "scripts": {
+    "build": "nuvriqo-ui-check src && vite build",
+    "check:ui": "nuvriqo-ui-check src"
+  },
   "dependencies": {
     "@forge/bridge": "6.3.1",
+    "@nuvriqo/ui": "github:rdersley/nuvriqo-ui#v0.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

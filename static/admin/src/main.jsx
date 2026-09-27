@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { invoke } from '@forge/bridge';
+import { invoke, view as forgeView } from '@forge/bridge';
+import '@nuvriqo/ui/css';
+import { enableTheme } from '@nuvriqo/ui/theme';
 import ActivityPanel from './ActivityPanel.jsx';
 import './styles.css';
+
+enableTheme(forgeView);
 
 const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
 
@@ -500,29 +504,36 @@ function App() {
     finally { setBusy(false); }
   }
 
-  if (!setup) return <main className="page"><h1>Nuvriqo Follow-Up Manager</h1><p>{busy ? 'Loading project configuration…' : message}</p></main>;
+  if (!setup) return <main className="page nq-page">{busy ? <div className="nq-loading" role="status"><span className="nq-spinner" aria-hidden="true"></span><span>Loading project configuration…</span></div> : <div className="nq-notice nq-notice--error" role="alert"><div>{message}</div></div>}</main>;
 
   const unit = editing?.timingUnit ?? 'days';
   const unitLabel = unit === 'hours' ? 'hours' : 'days';
 
-  return <main className="page">
-    <div className="header">
-      <div><p className="eyebrow">Nuvriqo</p><h1>Customer Follow-Up Manager</h1><p>Configure follow-up and auto-close policies for <strong>{setup.projectKey}</strong>.</p></div>
-      {!editing && view === 'rules' && <button className="primary" onClick={() => setEditing(emptyRule(setup.projectKey))}>Create rule</button>}
-    </div>
+  return <main className="page nq-page">
+    <header className="nq-header">
+      <div className="nq-header__brand">
+        <span className="nq-mark" aria-hidden="true">↻</span>
+        <div className="nq-header__text">
+          <span className="nq-eyebrow">Nuvriqo</span>
+          <h1 className="nq-header__title">Customer Follow-Up Manager</h1>
+          <p className="nq-header__subtitle">Configure follow-up and auto-close policies for <strong>{setup.projectKey}</strong>.</p>
+        </div>
+      </div>
+      {!editing && view === 'rules' && <div className="nq-header__meta"><button className="primary" onClick={() => setEditing(emptyRule(setup.projectKey))}>Create rule</button></div>}
+    </header>
 
-    <div className="top-tabs">
-      <button className={(view === 'rules' || editing) ? 'tab-active' : ''} onClick={() => {
+    <nav className="nq-tabs" role="tablist">
+      <button className="nq-tab" role="tab" aria-selected={Boolean(view === 'rules' || editing)} onClick={() => {
         if (editing && !confirm('Leave this rule without saving your changes?')) return;
         setEditing(null);
         setView('rules');
       }}>Rules</button>
-      <button className={!editing && view === 'activity' ? 'tab-active' : ''} onClick={() => {
+      <button className="nq-tab" role="tab" aria-selected={!editing && view === 'activity'} onClick={() => {
         if (editing && !confirm('Leave this rule without saving your changes?')) return;
         setEditing(null);
         setView('activity');
       }}>Run history</button>
-    </div>
+    </nav>
 
     {message && <div className="notice">{message}</div>}
 

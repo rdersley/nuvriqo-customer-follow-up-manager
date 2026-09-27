@@ -1,7 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { invoke } from '@forge/bridge';
+import { invoke, view as forgeView } from '@forge/bridge';
+import '@nuvriqo/ui/css';
+import { enableTheme } from '@nuvriqo/ui/theme';
 import './styles.css';
+
+enableTheme(forgeView);
 
 function fmt(value) {
   if (!value) return '—';
