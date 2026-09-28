@@ -28,15 +28,21 @@ modules:
       function: issue-handler
       events:
         - avi:jira:updated:issue
+      filter:
+        appIsLicensed: true
     - key: nuvriqo-comment
       function: comment-handler
       events:
         - avi:jira:commented:issue
+      filter:
+        appIsLicensed: true
 
   scheduledTrigger:
     - key: nuvriqo-hourly
       function: followup-processor
       interval: hour
+      filter:
+        appIsLicensed: true
     - key: nuvriqo-privacy
       function: privacy-handler
       interval: week

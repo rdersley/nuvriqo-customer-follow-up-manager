@@ -1,5 +1,6 @@
 import { getIssue, getRequestComment, getRequestParticipants, getStatusEnteredAt, searchIssues } from './jira.js';
 import { cancelForCustomerReply, cycleStartForDiscovery, nextDueAtForCycle, processCycle, reconcileIssue } from './followups.js';
+import { triggerLicenseAllows } from './license.js';
 import { getRuleConditions } from './rules.js';
 import {
   appendAudit,
@@ -24,8 +25,10 @@ function invocationContext(event, context) {
   return context ?? event?.context ?? null;
 }
 
+// Licensing for these triggers is enforced by `filter.appIsLicensed` in
+// manifest.yml; see src/license.js for why and for the in-code fallback.
 function licenseAllows(context) {
-  return context?.license == null || context.license.active === true;
+  return triggerLicenseAllows(context);
 }
 
 function jqlQuote(value) {

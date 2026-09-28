@@ -113,7 +113,7 @@ This checklist tracks the minimum work needed to move the app from development i
 - Site: `nuvriqo.atlassian.net`
 - JSM project: `TEST` (Testing)
 - Genuine JSM request: `TEST-1`
-- QA filters: `Labels = client-ryanair` AND `Labels = type-hardware`
+- QA filters: `Labels = client-acme` AND `Labels = type-hardware`
 - Waiting status: `Pending`
 - Scheduled public reminder successfully posted by Nuvriqo on 21 Aug 2026.
 - Customer-reply cancellation verified on the first cycle.

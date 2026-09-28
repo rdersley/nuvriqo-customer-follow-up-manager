@@ -6,7 +6,7 @@ Open **Project settings → Apps → Nuvriqo Follow-Up Manager** and select **Cr
 
 Each rule contains:
 
-- **Rule name** — descriptive label such as `Ryanair hardware follow-up`.
+- **Rule name** — descriptive label such as `Acme hardware follow-up`.
 - **Priority** — lower numbers are evaluated first when multiple rules could match.
 - **Waiting status** — the status that starts the follow-up cycle.
 - **Time unit** — days for production use, or hours for fast testing.
@@ -18,10 +18,10 @@ Each rule contains:
 
 Use multiple filters to create client-specific behaviour. Example:
 
-- `SD Client = RYR - Ryanair`
+- `SD Client = ACME - Acme Corp`
 - `Ticket Type = Hardware`
 
-A separate Ryanair rule can use a different Ticket Type and a different number of reminders.
+A separate Acme rule can use a different Ticket Type and a different number of reminders.
 
 Nuvriqo loads available Jira fields automatically. For option-backed fields it combines Jira field metadata, values observed on project work items and Jira autocomplete data to populate the value selector.
 

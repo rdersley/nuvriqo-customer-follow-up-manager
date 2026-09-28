@@ -32,6 +32,8 @@ The Marketplace release has Forge licensing enabled. Atlassian supports testing 
 forge install --environment development --license active
 ```
 
+In production the app fails closed: if Forge supplies no licence, or an inactive one, the admin page and issue panel are read-only. Issue-event and hourly processing triggers use `filter.appIsLicensed: true`, so Forge skips them on unlicensed sites. The weekly privacy job always runs. In development and staging a missing licence is allowed; you can also simulate a state with `forge variables set --environment development LICENSE_OVERRIDE inactive` (or `active`).
+
 Use development or staging for paid-app validation. Do not use production merely as a test installation once the paid Marketplace listing is live.
 
 ## Where configuration appears
