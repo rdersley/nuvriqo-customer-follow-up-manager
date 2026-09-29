@@ -32,6 +32,15 @@ export function nextDueAtForCycle(cycle, rule) {
     if (Number.isFinite(amount)) return new Date(started + amount * unitMs(rule)).toISOString();
   }
 
+  if (rule?.finalAction?.enabled === false) {
+    if (cycle?.nextRepeatAt) return cycle.nextRepeatAt;
+    const reminders = rule.reminders ?? [];
+    const lastAmount = Number(reminders.at(-1)?.afterDays);
+    const repeatEvery = Number(rule?.repeatEvery ?? lastAmount);
+    if (!Number.isFinite(lastAmount) || !Number.isFinite(repeatEvery) || repeatEvery <= 0) return null;
+    return new Date(started + (lastAmount + repeatEvery) * unitMs(rule)).toISOString();
+  }
+
   const finalAmount = Number(rule?.finalAction?.afterDays);
   return Number.isFinite(finalAmount)
     ? new Date(started + finalAmount * unitMs(rule)).toISOString()
@@ -105,9 +114,19 @@ export async function reconcileIssue(issue, rules, options = {}) {
   return cycle;
 }
 
-export async function cancelForCustomerReply(issueId, issueKey) {
+export async function cancelForCustomerReply(issueId, issueKey, rules = []) {
   const cycle = await getCycle(issueId);
   if (!cycle?.active) return false;
+  const rule = (rules ?? []).find((item) => item.id === cycle.ruleId);
+  if (rule?.finalAction?.enabled === false) {
+    await appendAudit(issueId, 'customer-replied', {
+      issueKey,
+      ruleId: cycle.ruleId,
+      ruleName: rule.name,
+      reason: 'Recurring follow-up remains active until the rule filters no longer match'
+    });
+    return false;
+  }
   await deleteCycle(issueId, cycle);
   await appendAudit(issueId, 'cycle-cancelled', { issueKey, ruleId: cycle.ruleId, reason: 'Customer replied' });
   return true;
@@ -217,6 +236,56 @@ export async function processCycle(cycle, rule, now = new Date()) {
       });
       return { action: 'reminder', reminderIndex: index };
     }
+  }
+
+  if (rule?.finalAction?.enabled === false) {
+    const repeatEvery = Number(rule?.repeatEvery ?? rule?.reminders?.at(-1)?.afterDays);
+    const lastReminder = rule?.reminders?.at(-1);
+    if (!lastReminder || !Number.isFinite(repeatEvery) || repeatEvery <= 0) {
+      cycle.nextDueAt = null;
+      await saveCycle(cycle);
+      return { action: 'none' };
+    }
+
+    const firstRepeatDue = new Date(
+      new Date(cycle.startedAt).getTime() +
+      (Number(lastReminder.afterDays) + repeatEvery) * unitMs(rule)
+    );
+    const repeatDueAt = cycle.nextRepeatAt ? new Date(cycle.nextRepeatAt) : firstRepeatDue;
+    if (now.getTime() >= repeatDueAt.getTime()) {
+      const context = buildTemplateContext(issue, cycle, {
+        daysWaiting,
+        waitingAmount,
+        waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
+      });
+      await addPublicCustomerComment(cycle.issueKey, renderTemplate(lastReminder.message, context));
+      if ((lastReminder.participantAccountIds ?? []).length) {
+        await addRequestParticipants(cycle.issueKey, lastReminder.participantAccountIds);
+      }
+      if (lastReminder.destinationStatusName) {
+        await transitionToStatus(cycle.issueKey, lastReminder.destinationStatusName);
+      }
+      cycle.repeatCount = Number(cycle.repeatCount ?? 0) + 1;
+      cycle.nextRepeatAt = new Date(now.getTime() + repeatEvery * unitMs(rule)).toISOString();
+      cycle.nextDueAt = cycle.nextRepeatAt;
+      await saveCycle(cycle);
+      await appendAudit(cycle.issueId, 'reminder-repeated', {
+        issueKey: cycle.issueKey,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        repeatCount: cycle.repeatCount,
+        repeatEvery,
+        timingUnit: rule?.timingUnit ?? 'days',
+        nextDueAt: cycle.nextDueAt,
+        filtersMatched: true
+      });
+      return { action: 'reminder-repeated', repeatCount: cycle.repeatCount };
+    }
+
+    cycle.nextRepeatAt = repeatDueAt.toISOString();
+    cycle.nextDueAt = cycle.nextRepeatAt;
+    await saveCycle(cycle);
+    return { action: 'none' };
   }
 
   if (waitingAmount >= Number(rule.finalAction.afterDays)) {

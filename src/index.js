@@ -36,18 +36,20 @@ function jqlQuote(value) {
 }
 
 export function buildDiscoveryJql(projectKey, waitingStatusName) {
-  return `project = ${jqlQuote(projectKey)} AND status = ${jqlQuote(waitingStatusName)}`;
+  return waitingStatusName
+    ? `project = ${jqlQuote(projectKey)} AND status = ${jqlQuote(waitingStatusName)}`
+    : `project = ${jqlQuote(projectKey)}`;
 }
 
 function discoveryGroups(rules) {
   const groups = new Map();
   for (const rule of rules ?? []) {
-    if (!rule?.enabled || !rule.projectKey || !rule.waitingStatusName) continue;
-    const key = `${rule.projectKey}\u0000${rule.waitingStatusName}`;
+    if (!rule?.enabled || !rule.projectKey) continue;
+    const key = `${rule.projectKey}\u0000${rule.waitingStatusName ?? ''}`;
     if (!groups.has(key)) {
       groups.set(key, {
         projectKey: rule.projectKey,
-        waitingStatusName: rule.waitingStatusName,
+        waitingStatusName: rule.waitingStatusName ?? '',
         rules: []
       });
     }
@@ -81,10 +83,11 @@ export async function onCommentCreated(event, context) {
   const commentId = event?.comment?.id;
   if (!issueKey || !issueId || !commentId) return;
 
-  const [issue, requestComment, participants] = await Promise.all([
+  const [issue, requestComment, participants, rules] = await Promise.all([
     getIssue(issueKey),
     getRequestComment(issueKey, commentId),
-    getRequestParticipants(issueKey).catch(() => [])
+    getRequestParticipants(issueKey).catch(() => []),
+    getRules()
   ]);
 
   if (requestComment?.public !== true) return;
@@ -99,7 +102,7 @@ export async function onCommentCreated(event, context) {
   const isCustomerReply = authorId === reporterId || participantIds.has(authorId);
 
   if (isCustomerReply) {
-    await cancelForCustomerReply(issueId, issueKey);
+    await cancelForCustomerReply(issueId, issueKey, rules);
   }
 }
 
@@ -121,7 +124,9 @@ async function discoverMissingCycles(rules, activeIssueIds, now) {
         if (!issue?.id || !issue?.key || activeIssueIds.has(issue.id)) continue;
 
         try {
-          const statusEnteredAt = await getStatusEnteredAt(issue.key, group.waitingStatusName);
+          const statusEnteredAt = group.waitingStatusName
+            ? await getStatusEnteredAt(issue.key, group.waitingStatusName)
+            : null;
           const cycle = await reconcileIssue(issue, group.rules, {
             startedAt: cycleStartForDiscovery(issue, statusEnteredAt, now),
             source: 'scheduler-discovery'
