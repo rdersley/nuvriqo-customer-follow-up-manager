@@ -70,6 +70,7 @@ export function cycleStillMatchesRule(rule, issue) {
   if (!rule?.enabled) return false;
   if (rule.projectKey && issue?.fields?.project?.key !== rule.projectKey) return false;
   if (!conditionsMatchIssue(rule, issue)) return false;
+  if (!rule.waitingStatusName) return true;
 
   const allowedStatuses = new Set([
     rule.waitingStatusName,
