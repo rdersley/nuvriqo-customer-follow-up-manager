@@ -32,7 +32,9 @@ const emptyRule = (projectKey = '') => ({
   timingUnit: 'days',
   conditions: [blankCondition()],
   reminders: [blankReminder(2)],
+  repeatEvery: 2,
   finalAction: {
+    enabled: true,
     afterDays: 7,
     destinationStatusName: '',
     resolutionId: '',
@@ -72,7 +74,8 @@ function normaliseRule(rule) {
     participantAccountIds: reminder.participantAccountIds ?? [],
     participants: reminder.participants ?? []
   }));
-  next.finalAction = { resolutionId: '', message: DEFAULT_FINAL_MESSAGE, fields: {}, ...(next.finalAction ?? {}) };
+  next.finalAction = { enabled: true, resolutionId: '', message: DEFAULT_FINAL_MESSAGE, fields: {}, ...(next.finalAction ?? {}) };
+  next.repeatEvery ??= Number(next.reminders?.at(-1)?.afterDays ?? 2) || 2;
   next.finalAction.fieldEntries = Object.entries(next.finalAction.fields ?? {})
     .filter(([fieldId]) => fieldId !== 'resolution')
     .map(([fieldId, value]) => valueToEntry(fieldId, value, next.finalAction.fieldUpdateModes?.[fieldId] ?? 'always', next.finalAction.fieldMatchValues?.[fieldId] ?? ''));
@@ -544,7 +547,7 @@ function App() {
             }).join(' AND ')
             : 'All matching tickets';
           return <div className="rule" key={rule.id}>
-            <div><div className="rule-title">{rule.name}</div><div className="muted">{conditionText} · {rule.reminders.length} reminder{rule.reminders.length === 1 ? '' : 's'} · {rule.timingUnit ?? 'days'} · → {rule.finalAction.destinationStatusName}</div></div>
+            <div><div className="rule-title">{rule.name}</div><div className="muted">{conditionText} · {rule.waitingStatusName || 'Any status'} · {rule.reminders.length} reminder{rule.reminders.length === 1 ? '' : 's'} · {rule.timingUnit ?? 'days'} · {rule.finalAction?.enabled === false ? `repeats every ${rule.repeatEvery ?? rule.reminders.at(-1)?.afterDays} ${rule.timingUnit ?? 'days'} while filters match` : `→ ${rule.finalAction?.destinationStatusName ?? ''}`}</div></div>
             <div className="actions"><button onClick={() => setEditing(normaliseRule(rule))}>Edit</button><button className="danger" onClick={() => remove(rule.id)}>Delete</button></div>
           </div>;
         })}</div>}
@@ -560,7 +563,7 @@ function App() {
 
       <h3>Start status</h3>
       <div className="grid two">
-        <label>Waiting status<select value={editing.waitingStatusName} onChange={(e) => update(['waitingStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
+        <label>Starting status <span className="hint-inline">Optional. Leave as Any status to run purely from the rule filters.</span><select value={editing.waitingStatusName} onChange={(e) => update(['waitingStatusName'], e.target.value)}><option value="">Any status</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
         <label>Time unit<select value={unit} onChange={(e) => update(['timingUnit'], e.target.value)}><option value="days">Days</option><option value="hours">Hours</option></select></label>
       </div>
 
@@ -586,7 +589,12 @@ function App() {
       </div>)}</div>
       <p className="hint">Template variables: {'{{customer.firstName}}'}, {'{{customer.name}}'}, {'{{issue.key}}'}, {'{{issue.summary}}'}, {'{{daysWaiting}}'}, {'{{waitingAmount}}'}, {'{{waitingUnit}}'}</p>
 
-      <h3>Final action</h3>
+      <div className="section-head"><h3>Final action</h3><label className="toggle"><input type="checkbox" checked={editing.finalAction?.enabled !== false} onChange={(e) => update(['finalAction', 'enabled'], e.target.checked)} /> Perform final action</label></div>
+      {editing.finalAction?.enabled === false && <div className="hint-box">
+        <strong>Recurring reminder mode.</strong> No final transition or closure will be performed. After the reminder sequence completes, the last reminder will repeat at the interval below until the ticket no longer matches the rule filters.
+        <label style={{ marginTop: 12 }}>Repeat last reminder every {unitLabel}<input type="number" min="1" value={editing.repeatEvery ?? 1} onChange={(e) => update(['repeatEvery'], Number(e.target.value))} /></label>
+      </div>}
+      {editing.finalAction?.enabled !== false && <>
       <div className="grid two">
         <label>Auto-transition after {unitLabel}<input type="number" min="0" value={editing.finalAction.afterDays} onChange={(e) => update(['finalAction', 'afterDays'], Number(e.target.value))} /></label>
         <label>Destination status<select value={editing.finalAction.destinationStatusName} onChange={(e) => update(['finalAction', 'destinationStatusName'], e.target.value)}><option value="">Choose status…</option>{statuses.map((status) => <option key={status.id} value={status.name}>{status.name}</option>)}</select></label>
@@ -604,6 +612,7 @@ function App() {
         <div className="conditions">{(editing.finalAction.fieldEntries ?? []).map((entry, index) => <TransitionFieldRow key={index} entry={entry} index={index} fields={fieldOptions} onUpdate={updateTransitionField} onRemove={removeTransitionField} />)}</div>}
 
       <p className="hint">At runtime Nuvriqo finds an available workflow transition whose destination matches the selected status and validates required workflow fields before transitioning.</p>
+      </>}
 
       <div className="footer-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save rule'}</button></div>
     </section>}
