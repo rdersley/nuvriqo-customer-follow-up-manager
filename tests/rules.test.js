@@ -184,3 +184,37 @@ test('advanced transition fields can update when current value equals or contain
     customfield_2: 'Unknown'
   });
 });
+
+
+test('rule can match without a starting status and remains valid across statuses', () => {
+  const statusless = rule({ waitingStatusName: '' });
+  assert.equal(ruleMatchesIssue(statusless, issue({ status: { name: 'In Progress' } })), true);
+  assert.equal(cycleStillMatchesRule(statusless, issue({ status: { name: 'Pending Review' } })), true);
+  assert.deepEqual(validateRule(statusless), []);
+});
+
+test('final action can be disabled when recurring reminder interval is valid', () => {
+  const recurring = rule({
+    waitingStatusName: '',
+    repeatEvery: 3,
+    finalAction: { enabled: false }
+  });
+  assert.deepEqual(validateRule(recurring), []);
+
+  const errors = validateRule(rule({
+    repeatEvery: 0,
+    finalAction: { enabled: false }
+  }));
+  assert.ok(errors.includes('Repeat reminder interval must be greater than zero'));
+});
+
+test('empty and not-empty rule filters support missing-information reminders', () => {
+  const missing = rule({
+    waitingStatusName: '',
+    conditions: [{ fieldId: 'customfield_10002', operator: 'isEmpty', value: '' }],
+    finalAction: { enabled: false },
+    repeatEvery: 2
+  });
+  assert.equal(ruleMatchesIssue(missing, issue({ customfield_10002: null, status: { name: 'In Progress' } })), true);
+  assert.equal(ruleMatchesIssue(missing, issue({ customfield_10002: { value: 'Provided' }, status: { name: 'In Progress' } })), false);
+});
