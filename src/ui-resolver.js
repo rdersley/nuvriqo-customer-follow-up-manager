@@ -107,14 +107,39 @@ function mergeOptions(...groups) {
   return [...map.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
+const permissionCache = new Map();
+
+function retryDelayMs(response, attempt) {
+  const retryAfter = Number(response?.headers?.get?.('retry-after'));
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) return Math.min(retryAfter * 1000, 5000);
+  return Math.min(500 * (2 ** attempt), 4000);
+}
+
 async function ensureProjectAdmin(projectKey) {
-  const response = await api.asUser().requestJira(
-    route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`
-  );
+  const cached = permissionCache.get(projectKey);
+  if (cached?.allowed === true && cached.expiresAt > Date.now()) return;
+
+  let response;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await api.asUser().requestJira(
+      route`/rest/api/3/mypermissions?projectKey=${projectKey}&permissions=ADMINISTER_PROJECTS`
+    );
+    if (response.status !== 429) break;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, retryDelayMs(response, attempt)));
+  }
+
+  if (response?.status === 429) {
+    if (cached?.allowed === true) return;
+    throw new Error('Jira is temporarily rate limiting permission checks. Please wait a moment and reload Follow-Up Manager.');
+  }
+
   const data = await readJson(response, 'Check project administration permission');
   if (data?.permissions?.ADMINISTER_PROJECTS?.havePermission !== true) {
+    permissionCache.delete(projectKey);
     throw new Error('You need Jira project administration permission to configure Nuvriqo rules.');
   }
+
+  permissionCache.set(projectKey, { allowed: true, expiresAt: Date.now() + 5 * 60 * 1000 });
 }
 
 async function ensureCanEditIssue(issueKey) {
