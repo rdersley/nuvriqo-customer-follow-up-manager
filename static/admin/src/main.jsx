@@ -159,9 +159,11 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
         <option value="notEquals">Does not equal</option>
         <option value="isAnyOf">Is any of</option>
         <option value="isNoneOf">Is none of</option>
+        <option value="isEmpty">Is empty</option>
+        <option value="isNotEmpty">Is not empty</option>
       </select>
     </label>
-    <label>Value
+    {!['isEmpty', 'isNotEmpty'].includes(condition.operator) && <label>Value
       {loading ? <div className="loading-field">Loading Jira values…</div> : options.length ?
         multi ? <details style={{ position: 'relative' }}>
           <summary style={{ cursor: 'pointer', border: '1px solid #8590a2', borderRadius: 3, padding: '8px 10px', minHeight: 20, background: '#fff' }}>
@@ -181,7 +183,7 @@ function ConditionRow({ condition, index, fields, onUpdate, onRemove, canRemove 
         multi ? <input value={selectedValues.join(', ')} onChange={(e) => onUpdate(index, 'value', e.target.value.split(',').map((value) => value.trim()).filter(Boolean))} placeholder="Enter values separated by commas" /> :
           <input value={condition.value ?? ''} onChange={(e) => onUpdate(index, 'value', e.target.value)} placeholder="Enter Jira value" />}
       <span className="hint-inline">{loading ? 'Reading values from Jira…' : options.length ? multi ? `${selectedValues.length} selected from ${options.length} Jira values.` : `${options.length} values loaded from Jira.` : multi ? 'Enter one or more Jira values separated by commas.' : 'No fixed values were returned. You can still enter the Jira value manually.'}</span>
-    </label>
+    </label>}
     {canRemove && <button className="icon-danger condition-remove" onClick={() => onRemove(index)} title="Remove filter">×</button>}
   </div>;
 }
@@ -536,9 +538,9 @@ function App() {
           const conditionText = conditions.length
             ? conditions.map((condition) => {
               const fieldName = fieldOptions.find((field) => field.id === condition.fieldId)?.name || condition.fieldId;
-              const operator = condition.operator === 'notEquals' ? '≠' : condition.operator === 'isAnyOf' ? 'is any of' : condition.operator === 'isNoneOf' ? 'is none of' : '=';
-              const value = Array.isArray(condition.value) ? condition.value.join(' OR ') : condition.value;
-              return `${fieldName} ${operator} ${value}`;
+              const operator = condition.operator === 'notEquals' ? '≠' : condition.operator === 'isAnyOf' ? 'is any of' : condition.operator === 'isNoneOf' ? 'is none of' : condition.operator === 'isEmpty' ? 'is empty' : condition.operator === 'isNotEmpty' ? 'is not empty' : '=';
+              const value = ['isEmpty', 'isNotEmpty'].includes(condition.operator) ? '' : (Array.isArray(condition.value) ? condition.value.join(' OR ') : condition.value);
+              return `${fieldName} ${operator}${value ? ` ${value}` : ''}`;
             }).join(' AND ')
             : 'All matching tickets';
           return <div className="rule" key={rule.id}>
