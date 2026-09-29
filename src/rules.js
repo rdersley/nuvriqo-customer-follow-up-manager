@@ -88,7 +88,6 @@ export function validateRule(rule) {
   if (!rule?.id) errors.push('Rule id is required');
   if (!String(rule?.name ?? '').trim()) errors.push('Rule name is required');
   if (!rule?.projectKey) errors.push('Project is required');
-  if (!rule?.waitingStatusName) errors.push('Waiting status is required');
   if (!['days', 'hours'].includes(rule?.timingUnit ?? 'days')) errors.push('Time unit must be days or hours');
 
   for (const condition of getRuleConditions(rule)) {
@@ -116,18 +115,26 @@ export function validateRule(rule) {
     errors.push('Every reminder needs a customer message');
   }
 
-  const finalValue = Number(rule?.finalAction?.afterDays);
-  if (!Number.isFinite(finalValue) || finalValue < 0) {
-    errors.push('Final action timing is required');
-  }
-  if (reminderValues.length && finalValue <= reminderValues[reminderValues.length - 1]) {
-    errors.push('Final action must occur after the last reminder');
-  }
-  if (!rule?.finalAction?.destinationStatusName) {
-    errors.push('Destination status is required');
-  }
-  if (!String(rule?.finalAction?.message ?? '').trim()) {
-    errors.push('Final action needs a customer message');
+  const finalEnabled = rule?.finalAction?.enabled !== false;
+  if (finalEnabled) {
+    const finalValue = Number(rule?.finalAction?.afterDays);
+    if (!Number.isFinite(finalValue) || finalValue < 0) {
+      errors.push('Final action timing is required');
+    }
+    if (reminderValues.length && finalValue <= reminderValues[reminderValues.length - 1]) {
+      errors.push('Final action must occur after the last reminder');
+    }
+    if (!rule?.finalAction?.destinationStatusName) {
+      errors.push('Destination status is required');
+    }
+    if (!String(rule?.finalAction?.message ?? '').trim()) {
+      errors.push('Final action needs a customer message');
+    }
+  } else {
+    const repeatEvery = Number(rule?.repeatEvery ?? rule?.reminders?.at(-1)?.afterDays);
+    if (!Number.isFinite(repeatEvery) || repeatEvery <= 0) {
+      errors.push('Repeat reminder interval must be greater than zero');
+    }
   }
   return [...new Set(errors)];
 }
