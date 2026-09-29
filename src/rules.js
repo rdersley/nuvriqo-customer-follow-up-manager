@@ -15,6 +15,16 @@ function equals(actual, expected) {
   return String(normalised ?? '').toLowerCase() === String(expected ?? '').toLowerCase();
 }
 
+function isEmptyFieldValue(value) {
+  if (value == null) return true;
+  if (Array.isArray(value)) return value.length === 0 || value.every(isEmptyFieldValue);
+  if (typeof value === 'object') {
+    const normalised = normaliseFieldValue(value);
+    return normalised == null || String(normalised).trim() === '';
+  }
+  return String(value).trim() === '';
+}
+
 function expectedValues(value) {
   return (Array.isArray(value) ? value : [value])
     .map((item) => String(item ?? '').trim())
@@ -39,6 +49,10 @@ export function conditionsMatchIssue(rule, issue) {
         return values.some((value) => equals(actual, value));
       case 'isNoneOf':
         return values.every((value) => !equals(actual, value));
+      case 'isEmpty':
+        return isEmptyFieldValue(actual);
+      case 'isNotEmpty':
+        return !isEmptyFieldValue(actual);
       default:
         return false;
     }
@@ -80,8 +94,8 @@ export function validateRule(rule) {
   for (const condition of getRuleConditions(rule)) {
     const operator = condition?.operator ?? 'equals';
     const values = expectedValues(condition?.value);
-    if (values.length === 0) errors.push('Each selected ticket field needs a value');
-    if (!['equals', 'notEquals', 'isAnyOf', 'isNoneOf'].includes(operator)) errors.push('Unsupported field comparison');
+    if (!['isEmpty', 'isNotEmpty'].includes(operator) && values.length === 0) errors.push('Each selected ticket field needs a value');
+    if (!['equals', 'notEquals', 'isAnyOf', 'isNoneOf', 'isEmpty', 'isNotEmpty'].includes(operator)) errors.push('Unsupported field comparison');
     if (['equals', 'notEquals'].includes(operator) && values.length > 1) {
       errors.push('Equals comparisons can only contain one value');
     }
