@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { invoke } from '@forge/bridge';
 import ActivityPanel from './ActivityPanel.jsx';
+import BackupRestore from './BackupRestore.jsx';
 import './styles.css';
 
 const DEFAULT_FINAL_MESSAGE = 'Hi {{customer.firstName}}, this request has now been closed because we have not received a response. If you still need help, please contact the service team.';
@@ -527,11 +528,17 @@ function App() {
         setEditing(null);
         setView('activity');
       }}>Run history</button>
+      <button className={!editing && view === 'backup' ? 'tab-active' : ''} onClick={() => {
+        if (editing && !confirm('Leave this rule without saving your changes?')) return;
+        setEditing(null);
+        setView('backup');
+      }}>Backup &amp; restore</button>
     </div>
 
     {message && <div className="notice">{message}</div>}
 
     {!editing && view === 'activity' && <ActivityPanel />}
+    {!editing && view === 'backup' && <BackupRestore invoke={invoke} app="Customer Follow-Up Manager" filePrefix="nuvriqo-follow-up-manager" />}
 
     {!editing && view === 'rules' && <section className="card">
       <h2>Follow-up rules</h2>
