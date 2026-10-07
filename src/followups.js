@@ -151,7 +151,7 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
     await appendAudit(cycle.issueId, 'reminder-comment-sent', { issueKey: cycle.issueKey, ruleId: rule.id, ruleName: rule.name, reminderIndex: index });
   }
 
-  if (!progress.statusChanged && reminder.destinationStatusName) {
+  if (!progress.statusChanged && reminder.destinationStatusName && !issueIsInStatus(issue, reminder.destinationStatusName)) {
     const transition = await transitionToStatus(cycle.issueKey, reminder.destinationStatusName);
     progress.statusChanged = true;
     cycle.reminderProgress[index] = progress;
@@ -161,6 +161,10 @@ async function processReminderActions(cycle, rule, issue, reminder, index, conte
 
   cycle.reminderProgress[index] = progress;
   return progress;
+}
+
+function issueIsInStatus(issue, statusName) {
+  return String(issue?.fields?.status?.name ?? '').toLowerCase() === String(statusName ?? '').toLowerCase();
 }
 
 export function isEmptyJiraFieldValue(value) {
@@ -253,18 +257,36 @@ export async function processCycle(cycle, rule, now = new Date()) {
     );
     const repeatDueAt = cycle.nextRepeatAt ? new Date(cycle.nextRepeatAt) : firstRepeatDue;
     if (now.getTime() >= repeatDueAt.getTime()) {
-      const context = buildTemplateContext(issue, cycle, {
-        daysWaiting,
-        waitingAmount,
-        waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
-      });
-      await addPublicCustomerComment(cycle.issueKey, renderTemplate(lastReminder.message, context));
-      if ((lastReminder.participantAccountIds ?? []).length) {
-        await addRequestParticipants(cycle.issueKey, lastReminder.participantAccountIds);
+      // Checkpoint each step against this repeat's due time so a failure after the
+      // comment (participants, transition) retries only the remaining steps instead
+      // of re-sending the customer comment on every scheduler run.
+      const dueKey = repeatDueAt.toISOString();
+      if (cycle.repeatProgress?.dueAt !== dueKey) cycle.repeatProgress = { dueAt: dueKey };
+      const progress = cycle.repeatProgress;
+      if (!progress.participantsAdded) {
+        if ((lastReminder.participantAccountIds ?? []).length) {
+          await addRequestParticipants(cycle.issueKey, lastReminder.participantAccountIds);
+        }
+        progress.participantsAdded = true;
+        await saveCycle(cycle);
       }
-      if (lastReminder.destinationStatusName) {
-        await transitionToStatus(cycle.issueKey, lastReminder.destinationStatusName);
+      if (!progress.commentSent) {
+        const context = buildTemplateContext(issue, cycle, {
+          daysWaiting,
+          waitingAmount,
+          waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days'
+        });
+        await addPublicCustomerComment(cycle.issueKey, renderTemplate(lastReminder.message, context));
+        progress.commentSent = true;
+        await saveCycle(cycle);
       }
+      if (!progress.statusChanged) {
+        if (lastReminder.destinationStatusName && !issueIsInStatus(issue, lastReminder.destinationStatusName)) {
+          await transitionToStatus(cycle.issueKey, lastReminder.destinationStatusName);
+        }
+        progress.statusChanged = true;
+      }
+      delete cycle.repeatProgress;
       cycle.repeatCount = Number(cycle.repeatCount ?? 0) + 1;
       cycle.nextRepeatAt = new Date(now.getTime() + repeatEvery * unitMs(rule)).toISOString();
       cycle.nextDueAt = cycle.nextRepeatAt;
