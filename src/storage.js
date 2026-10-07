@@ -9,7 +9,7 @@ const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const DUE_INDEX_KEY = `${SYSTEM_PREFIX}due-cycle-index`;
 const AUDIT_RETENTION_DAYS = 180;
-const RECENT_AUDIT_LIMIT = 25;
+const RECENT_AUDIT_LIMIT = 200;
 const SUPPRESSED_AUDIT_TYPES = new Set([
   'rule-check',
   'participants-added',
@@ -194,12 +194,12 @@ export async function replaceDueIndex(cycles = []) {
 }
 
 function compactAuditEvent(event) {
-  const keys = ['issueId','issueKey','timestamp','type','ruleId','ruleName','reason','message','action','filtersMatched','selected','reminderIndex','currentStatusName','destinationStatusName','failureStage','transitionId','transitionName','httpStatus','missingRequiredFields','availableDestinations','configuredFieldIds','resolutionId','resolutionName','commentSent','finalCommentSent','statusChanged','participantCount','after','timingUnit','source'];
+  const keys = ['issueId','issueKey','timestamp','type','ruleId','ruleName','reason','message','action','filtersMatched','selected','reminderIndex','currentStatusName','destinationStatusName','failureStage','transitionId','transitionName','httpStatus','missingRequiredFields','availableDestinations','configuredFieldIds','resolutionId','resolutionName','commentSent','finalCommentSent','statusChanged','participantCount','after','timingUnit','source','repeatCount','repeatEvery','startedAt','nextDueAt'];
   return Object.fromEntries(keys.filter((key) => event?.[key] !== undefined && event?.[key] !== null && event?.[key] !== '').map((key) => [key, event[key]]));
 }
 
 async function addRecentAudit(event) {
-  const important = new Set(['cycle-started','cycle-cancelled','reminder-completed','auto-transitioned','processing-error','cycle-paused','cycle-resumed','cycle-restarted']);
+  const important = new Set(['cycle-started','cycle-cancelled','reminder-completed','reminder-repeated','auto-transitioned','processing-error','cycle-paused','cycle-resumed','cycle-restarted']);
   if (!important.has(event?.type)) return;
   const current = await kvs.get(RECENT_AUDIT_KEY).catch(() => null);
   const events = [compactAuditEvent(event), ...(current?.events ?? [])].filter((item) => item?.timestamp).sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, RECENT_AUDIT_LIMIT);
