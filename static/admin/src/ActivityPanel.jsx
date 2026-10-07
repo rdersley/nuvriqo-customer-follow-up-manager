@@ -16,6 +16,11 @@ function actionSummary(item) {
     if (item.destinationStatusName) actions.push(`Status changed → ${item.destinationStatusName}`);
     return actions.join(' · ');
   }
+  if (item.type === 'reminder-repeated') {
+    const actions = [`Repeat ${Number(item.repeatCount) || 1}`, 'Customer comment sent'];
+    if (item.nextDueAt) actions.push(`Next due ${formatDate(item.nextDueAt)}`);
+    return actions.join(' · ');
+  }
   if (item.type === 'auto-transitioned') {
     const actions = [];
     if (item.finalCommentSent) actions.push('Final customer comment sent');
@@ -30,6 +35,8 @@ function rowForActivity(item) {
   if (item.type === 'rule-check') return { ...item, filters: item.filtersMatched ? 'Matched' : 'Not matched', actionText: item.action || 'None', tone: item.filtersMatched ? 'matched' : 'neutral' };
   if (item.type === 'reminder-completed') return { ...item, filters: 'Matched', actionText: actionSummary(item), tone: 'action' };
   if (item.type === 'auto-transitioned') return { ...item, filters: 'Matched', actionText: actionSummary(item), tone: 'action' };
+  if (item.type === 'reminder-repeated') return { ...item, filters: 'Matched', actionText: actionSummary(item), tone: 'action' };
+  if (item.type === 'cycle-started') return { ...item, filters: 'Matched', actionText: `Follow-up started${item.source ? ` (${item.source})` : ''}${item.nextDueAt ? ` — first due ${formatDate(item.nextDueAt)}` : ''}`, tone: 'neutral' };
   if (item.type === 'cycle-cancelled') return { ...item, filters: item.filtersMatched === false ? 'Not matched' : '—', actionText: `Follow-up cancelled${item.reason ? ` — ${item.reason}` : ''}`, tone: 'neutral' };
   if (item.type === 'processing-error') {
     const detail = item.message || 'Processing failed';
@@ -47,12 +54,12 @@ function rowForActivity(item) {
 function actionKind(item) {
   const text = String(item.actionText ?? '').toLowerCase();
   if (item.type === 'processing-error') return 'error';
-  if (item.type === 'reminder-completed' || item.type === 'auto-transitioned') {
+  if (item.type === 'reminder-completed' || item.type === 'reminder-repeated' || item.type === 'auto-transitioned') {
     if (text.includes('comment sent')) return 'comment';
     if (text.includes('status changed')) return 'status';
     return 'action';
   }
-  if (item.type === 'cycle-cancelled') return 'lifecycle';
+  if (item.type === 'cycle-cancelled' || item.type === 'cycle-started') return 'lifecycle';
   if (item.type === 'rule-check') {
     if (text.includes('follow-up started') || text.includes('follow-up cancelled')) return 'lifecycle';
     return 'check';
@@ -62,7 +69,7 @@ function actionKind(item) {
 
 function isConcreteAction(item) {
   if (item.tone === 'action') return true;
-  if (item.type === 'cycle-cancelled') return true;
+  if (item.type === 'cycle-cancelled' || item.type === 'cycle-started') return true;
   if (item.type === 'rule-check') return Boolean(item.action && item.action !== 'None' && !item.action.startsWith('None -'));
   return false;
 }
