@@ -20,6 +20,21 @@ export function cycleStartForDiscovery(issue, statusEnteredAt, now = new Date())
   return now.toISOString();
 }
 
+// Due times are measured from the cycle start, but never earlier than the configured
+// gap after the previous reminder actually went out. Without this, a cycle whose start
+// is already in the past (backdated to status entry, or an old ticket that newly
+// matches) sends every overdue reminder on consecutive hourly runs.
+function spacedDueAt(cycle, rule, amount) {
+  const started = new Date(cycle.startedAt).getTime();
+  let due = started + amount * unitMs(rule);
+  const lastSentAt = new Date(cycle.lastReminderSentAt ?? NaN).getTime();
+  const lastAmount = Number(cycle.lastReminderAfter);
+  if (Number.isFinite(lastSentAt) && Number.isFinite(lastAmount) && amount > lastAmount) {
+    due = Math.max(due, lastSentAt + (amount - lastAmount) * unitMs(rule));
+  }
+  return due;
+}
+
 export function nextDueAtForCycle(cycle, rule) {
   if (!cycle?.startedAt || !rule) return null;
   const started = new Date(cycle.startedAt).getTime();
@@ -29,7 +44,7 @@ export function nextDueAtForCycle(cycle, rule) {
   for (let index = 0; index < (rule.reminders ?? []).length; index += 1) {
     if (completed.has(index)) continue;
     const amount = Number(rule.reminders[index]?.afterDays);
-    if (Number.isFinite(amount)) return new Date(started + amount * unitMs(rule)).toISOString();
+    if (Number.isFinite(amount)) return new Date(spacedDueAt(cycle, rule, amount)).toISOString();
   }
 
   if (rule?.finalAction?.enabled === false) {
@@ -38,12 +53,12 @@ export function nextDueAtForCycle(cycle, rule) {
     const lastAmount = Number(reminders.at(-1)?.afterDays);
     const repeatEvery = Number(rule?.repeatEvery ?? lastAmount);
     if (!Number.isFinite(lastAmount) || !Number.isFinite(repeatEvery) || repeatEvery <= 0) return null;
-    return new Date(started + (lastAmount + repeatEvery) * unitMs(rule)).toISOString();
+    return new Date(spacedDueAt(cycle, rule, lastAmount + repeatEvery)).toISOString();
   }
 
   const finalAmount = Number(rule?.finalAction?.afterDays);
   return Number.isFinite(finalAmount)
-    ? new Date(started + finalAmount * unitMs(rule)).toISOString()
+    ? new Date(spacedDueAt(cycle, rule, finalAmount)).toISOString()
     : null;
 }
 
@@ -217,29 +232,32 @@ export async function processCycle(cycle, rule, now = new Date()) {
   const completed = new Set(cycle.completedReminderIndexes ?? []);
   for (let index = 0; index < (rule.reminders ?? []).length; index += 1) {
     const reminder = rule.reminders[index];
-    if (!completed.has(index) && waitingAmount >= Number(reminder.afterDays)) {
-      const context = buildTemplateContext(issue, cycle, { daysWaiting, waitingAmount, waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days' });
-      const progress = await processReminderActions(cycle, rule, issue, reminder, index, context);
-      completed.add(index);
-      cycle.completedReminderIndexes = [...completed].sort((a, b) => a - b);
-      cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
-      await saveCycle(cycle);
-      await appendAudit(cycle.issueId, 'reminder-completed', {
-        issueKey: cycle.issueKey,
-        ruleId: rule.id,
-        ruleName: rule.name,
-        reminderIndex: index,
-        destinationStatusName: reminder.destinationStatusName ?? '',
-        filtersMatched: true,
-        commentSent: progress.commentSent === true,
-        statusChanged: progress.statusChanged === true,
-        participantCount: (reminder.participantAccountIds ?? []).length,
-        after: reminder.afterDays,
-        timingUnit: rule?.timingUnit ?? 'days',
-        nextDueAt: cycle.nextDueAt
-      });
-      return { action: 'reminder', reminderIndex: index };
-    }
+    const amount = Number(reminder.afterDays);
+    if (completed.has(index) || !Number.isFinite(amount)) continue;
+    if (now.getTime() < spacedDueAt(cycle, rule, amount)) break;
+    const context = buildTemplateContext(issue, cycle, { daysWaiting, waitingAmount, waitingUnit: rule?.timingUnit === 'hours' ? 'hours' : 'days' });
+    const progress = await processReminderActions(cycle, rule, issue, reminder, index, context);
+    completed.add(index);
+    cycle.lastReminderSentAt = now.toISOString();
+    cycle.lastReminderAfter = amount;
+    cycle.completedReminderIndexes = [...completed].sort((a, b) => a - b);
+    cycle.nextDueAt = nextDueAtForCycle(cycle, rule);
+    await saveCycle(cycle);
+    await appendAudit(cycle.issueId, 'reminder-completed', {
+      issueKey: cycle.issueKey,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      reminderIndex: index,
+      destinationStatusName: reminder.destinationStatusName ?? '',
+      filtersMatched: true,
+      commentSent: progress.commentSent === true,
+      statusChanged: progress.statusChanged === true,
+      participantCount: (reminder.participantAccountIds ?? []).length,
+      after: reminder.afterDays,
+      timingUnit: rule?.timingUnit ?? 'days',
+      nextDueAt: cycle.nextDueAt
+    });
+    return { action: 'reminder', reminderIndex: index };
   }
 
   if (rule?.finalAction?.enabled === false) {
@@ -251,10 +269,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
       return { action: 'none' };
     }
 
-    const firstRepeatDue = new Date(
-      new Date(cycle.startedAt).getTime() +
-      (Number(lastReminder.afterDays) + repeatEvery) * unitMs(rule)
-    );
+    const firstRepeatDue = new Date(spacedDueAt(cycle, rule, Number(lastReminder.afterDays) + repeatEvery));
     const repeatDueAt = cycle.nextRepeatAt ? new Date(cycle.nextRepeatAt) : firstRepeatDue;
     if (now.getTime() >= repeatDueAt.getTime()) {
       // Checkpoint each step against this repeat's due time so a failure after the
@@ -310,7 +325,7 @@ export async function processCycle(cycle, rule, now = new Date()) {
     return { action: 'none' };
   }
 
-  if (waitingAmount >= Number(rule.finalAction.afterDays)) {
+  if (now.getTime() >= spacedDueAt(cycle, rule, Number(rule.finalAction.afterDays))) {
     cycle.finalActionProgress ??= {};
     const finalProgress = cycle.finalActionProgress;
     const finalMessage = String(rule?.finalAction?.message ?? '').trim();
