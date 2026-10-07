@@ -16,6 +16,7 @@ import {
 } from './storage.js';
 import { resolverLicenseAllows } from './license.js';
 import { validateRule } from './rules.js';
+import { exportBackupPage, importBackupBatch } from './backup.js';
 
 const resolver = new Resolver();
 
@@ -486,6 +487,26 @@ resolver.define('restartCycle', async ({ context }) => {
   if (!cycle) return { ok: false, error: 'This issue does not currently match a follow-up rule' };
   await appendAudit(issue.id, 'cycle-restarted', { issueKey: issue.key, ruleId: cycle.ruleId });
   return { ok: true };
+});
+
+// Backup & restore covers every project's rules and cycles, so it needs a Jira (site) admin.
+async function ensureJiraAdmin() {
+  const response = await api.asUser().requestJira(route`/rest/api/3/mypermissions?permissions=ADMINISTER`);
+  const data = await readJson(response, 'Check Jira administration permission');
+  if (data?.permissions?.ADMINISTER?.havePermission !== true) {
+    throw new Error('Only Jira administrators can back up or restore Follow-Up Manager.');
+  }
+}
+
+resolver.define('exportBackupPage', async ({ payload }) => {
+  await ensureJiraAdmin();
+  return exportBackupPage(payload?.cursor || null);
+});
+
+resolver.define('importBackupBatch', async ({ payload, context }) => {
+  ensureLicensedForWrite(context);
+  await ensureJiraAdmin();
+  return importBackupBatch(payload?.items);
 });
 
 export const handler = resolver.getDefinitions();
