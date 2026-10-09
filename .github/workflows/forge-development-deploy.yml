@@ -19,7 +19,9 @@ jobs:
     env:
       FORGE_EMAIL: ${{ secrets.FORGE_EMAIL }}
       FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
-      DEPLOY_SITE: retailinmotion.atlassian.net
+      # Nuvriqo test site. The Retail inMotion work site runs its own app
+      # (rdersley/RiM-customer-follow-up-manager); never install this one there.
+      DEPLOY_SITE: nuvriqo.atlassian.net
       DEPLOY_PRODUCT: jira
       DEPLOY_ENVIRONMENT: development
     steps:
