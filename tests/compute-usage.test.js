@@ -29,6 +29,7 @@ mock.module('../src/license.js', { namedExports: { triggerLicenseAllows: () => t
 
 const calls = { getIssue: 0, changelog: 0, comment: 0, participants: 0, searches: [] };
 let searchResults = [];
+let rejectFilteredSearch = false;
 mock.module('../src/jira.js', {
   namedExports: {
     async getIssue(key) {
@@ -38,7 +39,11 @@ mock.module('../src/jira.js', {
     async getRequestComment() { calls.comment += 1; return {}; },
     async getRequestParticipants() { calls.participants += 1; return []; },
     async getStatusEnteredAt() { calls.changelog += 1; return null; },
-    async searchIssues(jql) { calls.searches.push(jql); return searchResults; },
+    async searchIssues(jql) {
+      calls.searches.push(jql);
+      if (rejectFilteredSearch && jql.includes('(')) throw new Error('400 The value does not exist for the field');
+      return searchResults;
+    },
     async addPublicCustomerComment() { return {}; },
     async addRequestParticipants() { return {}; },
     async transitionToStatus() { return {}; }
@@ -47,6 +52,7 @@ mock.module('../src/jira.js', {
 
 const {
   buildDiscoveryJql,
+  discoveryFilterJql,
   discoveryFingerprint,
   onCommentCreated,
   onIssueUpdated,
@@ -73,6 +79,7 @@ function reset() {
   store.set('system:failed-retry-recovery-v1', { completedAt: 'x' });
   Object.assign(calls, { getIssue: 0, changelog: 0, comment: 0, participants: 0, searches: [] });
   searchResults = [];
+  rejectFilteredSearch = false;
 }
 
 test('buildDiscoveryJql adds an updated window only for recent scans', () => {
@@ -139,4 +146,49 @@ test('discovery skips changelog for non-matching tickets and narrows later runs'
   await processDueFollowUps({});
   assert.equal(calls.changelog, 1);
   assert.equal(store.get('cycle:2')?.active, true);
+});
+
+const anyStatusRule = {
+  ...rule,
+  id: 'r2',
+  waitingStatusName: '',
+  conditions: [
+    { fieldId: 'customfield_10002', operator: 'equals', value: 'Hardware' },
+    { fieldId: 'issuetype', operator: 'equals', value: 'Request' },
+    { fieldId: 'status', operator: 'notEquals', value: 'Resolved' }
+  ]
+};
+
+test('discoveryFilterJql pushes status and issue type conditions into the search', () => {
+  assert.equal(discoveryFilterJql([anyStatusRule]), 'issuetype = "Request" AND status != "Resolved"');
+  assert.equal(
+    discoveryFilterJql([{ ...rule, conditions: [{ fieldId: 'status', operator: 'isNoneOf', value: ['Resolved', 'Closed'] }] }]),
+    'status not in ("Resolved", "Closed")'
+  );
+  assert.equal(
+    discoveryFilterJql([anyStatusRule, { ...rule, conditions: [{ fieldId: 'issuetype', operator: 'isAnyOf', value: ['Incident'] }] }]),
+    '(issuetype = "Request" AND status != "Resolved") OR (issuetype in ("Incident"))'
+  );
+});
+
+test('discoveryFilterJql gives no filter when any rule in the group has nothing translatable', () => {
+  assert.equal(discoveryFilterJql([rule]), null);
+  assert.equal(discoveryFilterJql([anyStatusRule, rule]), null);
+  assert.equal(discoveryFilterJql([{ ...rule, conditions: [{ fieldId: 'status', operator: 'isEmpty', value: '' }] }]), null);
+});
+
+test('any-status discovery searches only tickets the rule filters allow', async () => {
+  reset();
+  store.set('rule:r1', anyStatusRule);
+  await processDueFollowUps({});
+  assert.equal(calls.searches.at(-1), 'project = "SD" AND (issuetype = "Request" AND status != "Resolved")');
+});
+
+test('discovery falls back to the unfiltered search when Jira rejects the filter', async () => {
+  reset();
+  store.set('rule:r1', anyStatusRule);
+  rejectFilteredSearch = true;
+  await processDueFollowUps({});
+  assert.deepEqual(calls.searches, ['project = "SD" AND (issuetype = "Request" AND status != "Resolved")', 'project = "SD"']);
+  assert.equal(store.get('system:scheduler-status').failures, 0);
 });

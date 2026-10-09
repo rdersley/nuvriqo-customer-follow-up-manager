@@ -37,11 +37,63 @@ function jqlQuote(value) {
   return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-export function buildDiscoveryJql(projectKey, waitingStatusName, updatedWithinMinutes = null) {
+export function buildDiscoveryJql(projectKey, waitingStatusName, updatedWithinMinutes = null, filterJql = null) {
   const clauses = [`project = ${jqlQuote(projectKey)}`];
   if (waitingStatusName) clauses.push(`status = ${jqlQuote(waitingStatusName)}`);
   if (Number.isFinite(updatedWithinMinutes)) clauses.push(`updated >= -${Math.ceil(updatedWithinMinutes)}m`);
+  if (filterJql) clauses.push(`(${filterJql})`);
   return clauses.join(' AND ');
+}
+
+// Rule conditions on these Jira system fields translate directly to JQL. Pushing
+// them into the search stops "any status" rules paging through every ticket in a
+// large project. Other conditions are still checked in code after the search.
+const JQL_SYSTEM_FIELDS = new Set(['status', 'issuetype']);
+
+function conditionJql(condition) {
+  if (!JQL_SYSTEM_FIELDS.has(condition?.fieldId)) return null;
+  const values = (Array.isArray(condition.value) ? condition.value : [condition.value])
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean);
+  if (values.length === 0) return null;
+  const field = condition.fieldId;
+  const list = `(${values.map(jqlQuote).join(', ')})`;
+  switch (condition.operator ?? 'equals') {
+    case 'equals': return `${field} = ${jqlQuote(values[0])}`;
+    case 'notEquals': return `${field} != ${jqlQuote(values[0])}`;
+    case 'isAnyOf': return `${field} in ${list}`;
+    case 'isNoneOf': return `${field} not in ${list}`;
+    default: return null;
+  }
+}
+
+// A JQL filter matching every ticket any of the group's rules could match, or null
+// when one of the rules has no translatable condition (the group then needs the
+// unfiltered search).
+export function discoveryFilterJql(rules) {
+  const perRule = [];
+  for (const rule of rules ?? []) {
+    const clauses = getRuleConditions(rule).map(conditionJql).filter(Boolean);
+    if (clauses.length === 0) return null;
+    perRule.push(clauses.join(' AND '));
+  }
+  if (perRule.length === 0) return null;
+  return perRule.length === 1 ? perRule[0] : perRule.map((clause) => `(${clause})`).join(' OR ');
+}
+
+async function searchDiscoveryIssues(group, updatedWithinMinutes) {
+  const fields = discoveryFields(group.rules);
+  const filterJql = discoveryFilterJql(group.rules);
+  if (filterJql) {
+    try {
+      return await searchIssues(buildDiscoveryJql(group.projectKey, group.waitingStatusName, updatedWithinMinutes, filterJql), fields);
+    } catch (error) {
+      // e.g. a status or issue type named in a rule no longer exists. Fall back to
+      // the unfiltered search rather than skipping the rule.
+      console.error(`Filtered discovery failed for ${group.projectKey}; retrying without rule filters:`, error);
+    }
+  }
+  return searchIssues(buildDiscoveryJql(group.projectKey, group.waitingStatusName, updatedWithinMinutes), fields);
 }
 
 const FULL_DISCOVERY_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -155,10 +207,7 @@ async function discoverMissingCycles(rules, activeIssueIds, now, updatedWithinMi
 
   for (const group of discoveryGroups(rules)) {
     try {
-      const issues = await searchIssues(
-        buildDiscoveryJql(group.projectKey, group.waitingStatusName, updatedWithinMinutes),
-        discoveryFields(group.rules)
-      );
+      const issues = await searchDiscoveryIssues(group, updatedWithinMinutes);
 
       for (const issue of issues) {
         checked += 1;
