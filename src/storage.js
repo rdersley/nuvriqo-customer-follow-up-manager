@@ -8,6 +8,7 @@ const SYSTEM_PREFIX = 'system:';
 const SCHEDULER_STATUS_KEY = `${SYSTEM_PREFIX}scheduler-status`;
 const RECENT_AUDIT_KEY = `${SYSTEM_PREFIX}recent-audit`;
 const DUE_INDEX_KEY = `${SYSTEM_PREFIX}due-cycle-index`;
+const DISCOVERY_STATE_KEY = `${SYSTEM_PREFIX}discovery-state`;
 const AUDIT_RETENTION_DAYS = 180;
 const RECENT_AUDIT_LIMIT = 200;
 const SUPPRESSED_AUDIT_TYPES = new Set([
@@ -233,6 +234,8 @@ export async function getRecentAudit(limit = 250) {
 
 export async function saveSchedulerStatus(status) { await kvs.set(SCHEDULER_STATUS_KEY, { ...status, updatedAt: new Date().toISOString() }); }
 export async function getSchedulerStatus() { return kvs.get(SCHEDULER_STATUS_KEY); }
+export async function getDiscoveryState() { return kvs.get(DISCOVERY_STATE_KEY); }
+export async function saveDiscoveryState(state) { await kvs.set(DISCOVERY_STATE_KEY, state); }
 
 export async function getPersonalDataAccounts() {
   const results = await queryByPrefix(ACCOUNT_PREFIX);

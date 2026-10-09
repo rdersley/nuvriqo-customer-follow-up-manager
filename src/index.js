@@ -1,7 +1,7 @@
 import { getIssue, getRequestComment, getRequestParticipants, getStatusEnteredAt, searchIssues } from './jira.js';
 import { cancelForCustomerReply, cycleStartForDiscovery, nextDueAtForCycle, processCycle, reconcileIssue } from './followups.js';
 import { triggerLicenseAllows } from './license.js';
-import { getRuleConditions } from './rules.js';
+import { getRuleConditions, selectRule } from './rules.js';
 import {
   appendAudit,
   deleteCycle,
@@ -9,11 +9,13 @@ import {
   getActiveCycles,
   getCycle,
   getCycleRefs,
+  getDiscoveryState,
   getDueCycleRefs,
   getRules,
   replaceDueIndex,
   recoverLegacyFailedCycles,
   saveCycle,
+  saveDiscoveryState,
   saveSchedulerStatus
 } from './storage.js';
 
@@ -35,10 +37,43 @@ function jqlQuote(value) {
   return `"${String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-export function buildDiscoveryJql(projectKey, waitingStatusName) {
-  return waitingStatusName
-    ? `project = ${jqlQuote(projectKey)} AND status = ${jqlQuote(waitingStatusName)}`
-    : `project = ${jqlQuote(projectKey)}`;
+export function buildDiscoveryJql(projectKey, waitingStatusName, updatedWithinMinutes = null) {
+  const clauses = [`project = ${jqlQuote(projectKey)}`];
+  if (waitingStatusName) clauses.push(`status = ${jqlQuote(waitingStatusName)}`);
+  if (Number.isFinite(updatedWithinMinutes)) clauses.push(`updated >= -${Math.ceil(updatedWithinMinutes)}m`);
+  return clauses.join(' AND ');
+}
+
+const FULL_DISCOVERY_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DISCOVERY_OVERLAP_MINUTES = 15;
+
+// Only the parts of a rule that decide which tickets it matches. Editing reminder
+// text or timings must not force a full rescan.
+export function discoveryFingerprint(rules) {
+  return JSON.stringify((rules ?? [])
+    .filter((rule) => rule?.enabled && rule.projectKey)
+    .map((rule) => [rule.id, rule.priority ?? 100, rule.projectKey, rule.waitingStatusName ?? '', getRuleConditions(rule)]));
+}
+
+// The issue-updated trigger starts cycles as tickets change, so hourly discovery is a
+// safety net. A full project scan runs when the matching rules change, after a gap in
+// scheduler runs, or once a day; otherwise only recently updated tickets are searched
+// (covering the app's own updates, which the trigger ignores, and missed events).
+export function planDiscovery(state, fingerprint, now = new Date()) {
+  const nowMs = now.getTime();
+  const lastFull = new Date(state?.lastFullScanAt ?? NaN).getTime();
+  const lastRun = new Date(state?.lastRunAt ?? NaN).getTime();
+  const full = state?.fingerprint !== fingerprint
+    || !Number.isFinite(lastFull) || nowMs - lastFull >= FULL_DISCOVERY_INTERVAL_MS
+    || !Number.isFinite(lastRun) || nowMs - lastRun >= FULL_DISCOVERY_INTERVAL_MS;
+  if (full) return { full: true, updatedWithinMinutes: null };
+  return { full: false, updatedWithinMinutes: Math.ceil((nowMs - lastRun) / 60000) + DISCOVERY_OVERLAP_MINUTES };
+}
+
+// Issue events fire for every ticket on the site; skip Jira calls when no enabled
+// rule could apply to the event's project.
+export function rulesMayApplyToProject(rules, projectKey) {
+  return (rules ?? []).some((rule) => rule?.enabled && (!rule.projectKey || !projectKey || rule.projectKey === projectKey));
 }
 
 function discoveryGroups(rules) {
@@ -71,7 +106,9 @@ export async function onIssueUpdated(event, context) {
   const issueKey = eventIssueKey(event);
   if (!issueKey) return;
 
-  const [issue, rules] = await Promise.all([getIssue(issueKey), getRules()]);
+  const rules = await getRules();
+  if (!rulesMayApplyToProject(rules, event?.issue?.fields?.project?.key)) return;
+  const issue = await getIssue(issueKey);
   await reconcileIssue(issue, rules);
 }
 
@@ -82,6 +119,10 @@ export async function onCommentCreated(event, context) {
   const issueId = event?.issue?.id;
   const commentId = event?.comment?.id;
   if (!issueKey || !issueId || !commentId) return;
+
+  // Only a ticket with an active cycle can be affected by a customer reply.
+  const cycle = await getCycle(issueId);
+  if (!cycle?.active) return;
 
   const [issue, requestComment, participants, rules] = await Promise.all([
     getIssue(issueKey),
@@ -106,7 +147,7 @@ export async function onCommentCreated(event, context) {
   }
 }
 
-async function discoverMissingCycles(rules, activeIssueIds, now) {
+async function discoverMissingCycles(rules, activeIssueIds, now, updatedWithinMinutes = null) {
   let checked = 0;
   let started = 0;
   let actions = 0;
@@ -115,13 +156,16 @@ async function discoverMissingCycles(rules, activeIssueIds, now) {
   for (const group of discoveryGroups(rules)) {
     try {
       const issues = await searchIssues(
-        buildDiscoveryJql(group.projectKey, group.waitingStatusName),
+        buildDiscoveryJql(group.projectKey, group.waitingStatusName, updatedWithinMinutes),
         discoveryFields(group.rules)
       );
 
       for (const issue of issues) {
         checked += 1;
         if (!issue?.id || !issue?.key || activeIssueIds.has(issue.id)) continue;
+        // Search results already carry the rule fields; don't fetch changelogs or
+        // cycles for tickets no rule matches.
+        if (!selectRule(group.rules, issue)) continue;
 
         try {
           const statusEnteredAt = group.waitingStatusName
@@ -182,6 +226,7 @@ export async function processDueFollowUps(event, context) {
   let failures = 0;
   let discoveryChecked = 0;
   let discoveryStarted = 0;
+  let discoveryMode = null;
 
   await saveSchedulerStatus({
     startedAt,
@@ -222,7 +267,18 @@ export async function processDueFollowUps(event, context) {
       actions += 1;
     }
 
-    const discovery = await discoverMissingCycles(rules, activeIssueIds, now);
+    const fingerprint = discoveryFingerprint(rules);
+    const discoveryState = await getDiscoveryState().catch(() => null);
+    const plan = planDiscovery(discoveryState, fingerprint, now);
+    discoveryMode = plan.full ? 'full' : 'recent';
+    const discovery = await discoverMissingCycles(rules, activeIssueIds, now, plan.updatedWithinMinutes);
+    if (discovery.failures === 0) {
+      await saveDiscoveryState({
+        fingerprint,
+        lastRunAt: startedAt,
+        lastFullScanAt: plan.full ? startedAt : discoveryState?.lastFullScanAt
+      }).catch(() => undefined);
+    }
     discoveryChecked = discovery.checked;
     discoveryStarted = discovery.started;
     actions += discovery.actions;
@@ -291,6 +347,7 @@ export async function processDueFollowUps(event, context) {
       dueCyclesSeen: dueRefsNow.length,
       discoveryChecked,
       discoveryStarted,
+      discoveryMode,
       processed,
       actions,
       failures,
