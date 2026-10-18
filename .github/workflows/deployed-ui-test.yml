@@ -46,6 +46,8 @@ jobs:
           mkdir -p .auth
           printf '%s' "$JIRA_STORAGE_STATE_GZIP_B64" | base64 --decode | gzip --decompress > .auth/jira.json
           test -s .auth/jira.json
+      - name: Verify Jira session
+        run: node ui-tests/check-session.cjs
       - run: npx playwright test
       - if: always()
         uses: actions/upload-artifact@v4
