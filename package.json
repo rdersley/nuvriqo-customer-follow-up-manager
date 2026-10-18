@@ -14,7 +14,8 @@
     "test": "node --experimental-default-type=module --experimental-test-module-mocks --test tests/*.test.js",
     "lint": "forge lint",
     "check": "npm test && npm run build:ui && forge lint",
-    "deploy": "npm run build:ui && forge deploy"
+    "deploy": "npm run build:ui && forge deploy",
+    "qa:refresh-session": "node scripts/refresh-jira-session.cjs"
   },
   "dependencies": {
     "@forge/api": "8.0.4",
