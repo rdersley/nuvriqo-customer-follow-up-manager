@@ -2,6 +2,8 @@
 
 Forge app for Jira Service Management that manages configurable customer follow-up sequences and automatically transitions stale requests to a chosen destination status.
 
+**Live on the Atlassian Marketplace for Jira Cloud:** [install or start a free trial](https://marketplace.atlassian.com/apps/1388608134/nuvriqo-follow-up-manager?utm_source=github&utm_medium=readme&utm_campaign=follow_up_manager) · [product page and demo video](https://nuvriqo.com/apps/customer-follow-up-manager.html) · [support](https://nuvriqo.com/support.html)
+
 ## V1 capabilities
 
 - Multiple follow-up rules per project.
